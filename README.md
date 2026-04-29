@@ -49,11 +49,11 @@ print(retriever.last_provenance.render())         # see what was used
 
 ```python
 from langchain_chroma import Chroma
-from langchain_openai import OpenAIEmbeddings
+from langchain_ollama import OllamaEmbeddings
 
 vectorstore = Chroma(
     collection_name="my_docs",
-    embedding_function=OpenAIEmbeddings(),
+    embedding_function=OllamaEmbeddings(model="nomic-embed-text:latest"),
     persist_directory="./chroma_db",
 )
 global_retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
@@ -61,6 +61,7 @@ global_retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 retriever = RagWikiRetriever(
     user_id="user-1",
     global_retriever=global_retriever,
+    config=RagWikiRetrieverConfig(wiki_save_dir="wiki/documents"),
 )
 ```
 
@@ -88,11 +89,13 @@ retriever = RagWikiRetriever(
 
 ### RagWikiRetrieverConfig
 
-| Parameter             | Type  | Default | Description                                         |
-|-----------------------|-------|---------|-----------------------------------------------------|
-| `fetch_threshold`     | `int` | `3`     | Fetches before a save suggestion fires               |
-| `no_resiluggest_days` | `int` | `30`    | Days to wait before re-suggesting a declined doc     |
-| `decay`               | `DecayConfig` | *(see below)* | Decay engine settings              |
+| Parameter             | Type    | Default | Description                                                    |
+|-----------------------|---------|---------|----------------------------------------------------------------|
+| `fetch_threshold`     | `int`   | `3`     | Fetches before a save suggestion fires                         |
+| `reset_threshold`     | `int`   | `3`     | Consecutive missed queries before fetch count resets to 0      |
+| `wiki_save_dir`       | `str`   | `None`  | Directory to save accepted doc copies; `None` disables saving  |
+| `no_resiluggest_days` | `int`   | `30`    | Deprecated — kept for API compatibility                        |
+| `decay`               | `DecayConfig` | *(see below)* | Decay engine settings                            |
 
 ### DecayConfig
 

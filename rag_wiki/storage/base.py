@@ -31,6 +31,8 @@ class UserDocRecord:
     pinned_at:           Optional[datetime] = None
     demoted_at:          Optional[datetime] = None
     no_resiluggest_until: Optional[datetime] = None  # after user declines
+    next_suggest_at:     int           = 0    # fetch_count target for next suggestion (0 = use threshold)
+    queries_missed:      int           = 0    # consecutive queries where doc was not retrieved
 
 
 class StateStore(ABC):
@@ -57,6 +59,11 @@ class StateStore(ABC):
     @abstractmethod
     def list_pinned(self, user_id: str) -> list[UserDocRecord]:
         """All PINNED docs for a user — injected into every context."""
+        ...
+
+    @abstractmethod
+    def list_surfaced(self, user_id: str) -> list[UserDocRecord]:
+        """All SURFACED and SUGGESTED docs for a user — used for miss tracking."""
         ...
 
     @abstractmethod

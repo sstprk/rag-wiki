@@ -55,6 +55,8 @@ class SQLiteStateStore(StateStore):
             Column("pinned_at",            DateTime),
             Column("demoted_at",           DateTime),
             Column("no_resiluggest_until", DateTime),
+            Column("next_suggest_at",      Integer, nullable=False, default=0),
+            Column("queries_missed",       Integer, nullable=False, default=0),
         )
 
     # ─── Helpers ───────────────────────────────────────────────────────────────
@@ -76,6 +78,8 @@ class SQLiteStateStore(StateStore):
             pinned_at            = row.pinned_at,
             demoted_at           = row.demoted_at,
             no_resiluggest_until = row.no_resiluggest_until,
+            next_suggest_at      = row.next_suggest_at if hasattr(row, "next_suggest_at") else 0,
+            queries_missed       = row.queries_missed if hasattr(row, "queries_missed") else 0,
         )
 
     def _record_to_dict(self, record: UserDocRecord) -> dict:
@@ -95,6 +99,8 @@ class SQLiteStateStore(StateStore):
             "pinned_at":            record.pinned_at,
             "demoted_at":           record.demoted_at,
             "no_resiluggest_until": record.no_resiluggest_until,
+            "next_suggest_at":      record.next_suggest_at,
+            "queries_missed":       record.queries_missed,
         }
 
     # ─── StateStore interface ──────────────────────────────────────────────────
@@ -148,6 +154,20 @@ class SQLiteStateStore(StateStore):
                 select(self._table).where(
                     self._table.c.user_id    == user_id,
                     self._table.c.user_state == DocumentState.PINNED.value,
+                )
+            ).fetchall()
+        return [self._row_to_record(r) for r in rows]
+
+    def list_surfaced(self, user_id: str) -> list[UserDocRecord]:
+        """All SURFACED and SUGGESTED docs — used for miss tracking."""
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                select(self._table).where(
+                    self._table.c.user_id == user_id,
+                    self._table.c.user_state.in_([
+                        DocumentState.SURFACED.value,
+                        DocumentState.SUGGESTED.value,
+                    ]),
                 )
             ).fetchall()
         return [self._row_to_record(r) for r in rows]

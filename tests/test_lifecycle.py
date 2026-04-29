@@ -122,17 +122,18 @@ class TestFetchCounter:
         counter.decline_suggestion("u1", "d1")
         record = store.get("u1", "d1")
         assert record.user_state == DocumentState.SURFACED
-        assert record.no_resiluggest_until is not None
+        # next_suggest_at is set to an escalated target after decline
+        assert record.next_suggest_at > record.fetch_count
 
-    def test_decline_then_fetch_again_no_suggestion_during_block(self, counter):
+    def test_decline_then_fetch_again_no_suggestion_until_target(self, counter):
         for _ in range(3):
             counter.record_fetch("u1", "d1", "Doc", "/kb/doc.pdf")
         counter.decline_suggestion("u1", "d1")
-        # Reset suggestion_sent to False (simulated by decline)
-        # More fetches should not fire during block period
+        # After decline with threshold=3, next target = fetch_count + threshold*2 = 3+6 = 9
+        # Fetches 4-8 should not fire a suggestion
         for _ in range(5):
             event = counter.record_fetch("u1", "d1", "Doc", "/kb/doc.pdf")
-            assert event is None  # blocked
+            assert event is None  # not yet at next_suggest_at
 
     def test_no_counter_increment_for_claimed_docs(self, counter, store):
         for _ in range(3):
