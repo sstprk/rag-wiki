@@ -7,8 +7,8 @@ Returns both a structured dict (for programmatic use) and a formatted string
 from dataclasses import dataclass, field
 from typing import Optional
 
-from hybrid_kb.storage.base import DocumentState, UserDocRecord
-from hybrid_kb.lifecycle.fetch_counter import SuggestionEvent
+from rag_wiki.storage.base import DocumentState, UserDocRecord
+from rag_wiki.lifecycle.fetch_counter import SuggestionEvent
 
 
 @dataclass
@@ -114,7 +114,7 @@ class ProvenanceBlock:
 class ProvenanceBuilder:
     """
     Assembles a ProvenanceBlock from retrieved documents and lifecycle records.
-    Designed to be called at the end of HybridRetriever._get_relevant_documents().
+    Designed to be called at the end of RagWikiRetriever._get_relevant_documents().
     """
 
     def build(

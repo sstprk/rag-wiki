@@ -1,5 +1,5 @@
 """
-Integration tests for HybridRetriever.
+Integration tests for RagWikiRetriever.
 Uses a MockRetriever instead of a real vector DB.
 """
 
@@ -9,20 +9,19 @@ from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.callbacks import CallbackManagerForRetrieverRun
 
-from hybrid_kb import HybridRetriever, HybridRetrieverConfig, DocumentState
-from hybrid_kb.storage.sqlite import SQLiteStateStore
-from hybrid_kb.lifecycle.fetch_counter import SuggestionEvent
+from rag_wiki import RagWikiRetriever, RagWikiRetrieverConfig, DocumentState
+from rag_wiki.storage.sqlite import SQLiteStateStore
+from rag_wiki.lifecycle.fetch_counter import SuggestionEvent
 
 
 # ─── Mock global retriever ────────────────────────────────────────────────────
 
 class MockGlobalRetriever(BaseRetriever):
-    """Returns a fixed set of documents with proper hybrid_kb metadata."""
+    """Returns a fixed set of documents with proper rag_wiki metadata."""
 
     docs: List[Document] = []
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = {"arbitrary_types_allowed": True}
 
     def _get_relevant_documents(
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun
@@ -58,11 +57,11 @@ def global_retriever():
 
 @pytest.fixture
 def retriever(store, global_retriever):
-    return HybridRetriever(
+    return RagWikiRetriever(
         user_id          = "user-test",
         global_retriever = global_retriever,
         state_store      = store,
-        config           = HybridRetrieverConfig(fetch_threshold=3),
+        config           = RagWikiRetrieverConfig(fetch_threshold=3),
     )
 
 

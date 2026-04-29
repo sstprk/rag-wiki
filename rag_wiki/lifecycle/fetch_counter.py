@@ -4,11 +4,20 @@ when the threshold is met. Coordinates with StateMachine for state updates.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from hybrid_kb.storage.base import DocumentState, StateStore, UserDocRecord
-from hybrid_kb.lifecycle.state_machine import StateMachine
+from rag_wiki.storage.base import DocumentState, StateStore, UserDocRecord
+from rag_wiki.lifecycle.state_machine import StateMachine
+
+
+def _ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Normalise a datetime to UTC-aware. Naive datetimes are assumed UTC."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 @dataclass
@@ -60,7 +69,7 @@ class FetchCounter:
         Returns a SuggestionEvent if this fetch crosses the threshold
         and a suggestion should be shown, otherwise None.
         """
-        now = now or datetime.utcnow()
+        now = now or datetime.now(timezone.utc)
         record = self._get_or_create(user_id, doc_id, doc_title, doc_path, now)
 
         # Don't double-count pinned/claimed — they use a different retrieval path
@@ -98,7 +107,7 @@ class FetchCounter:
         User clicked 'Not now'. Stay in SURFACED but block re-suggestion
         for no_resiluggest_days.
         """
-        now = now or datetime.utcnow()
+        now = now or datetime.now(timezone.utc)
         record = self._store.get(user_id, doc_id)
         if record is None:
             raise ValueError(f"No record for user={user_id}, doc={doc_id}")
@@ -141,7 +150,7 @@ class FetchCounter:
             return None
         if (
             record.no_resiluggest_until is not None
-            and now < record.no_resiluggest_until
+            and now < _ensure_utc(record.no_resiluggest_until)
         ):
             return None
 

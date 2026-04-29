@@ -3,13 +3,13 @@ Tests for StateMachine, FetchCounter, and DecayEngine.
 """
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-from hybrid_kb.storage.base import DocumentState, UserDocRecord
-from hybrid_kb.storage.sqlite import SQLiteStateStore
-from hybrid_kb.lifecycle.state_machine import StateMachine, InvalidTransitionError
-from hybrid_kb.lifecycle.fetch_counter import FetchCounter
-from hybrid_kb.lifecycle.decay_engine import DecayEngine, DecayConfig
+from rag_wiki.storage.base import DocumentState, UserDocRecord
+from rag_wiki.storage.sqlite import SQLiteStateStore
+from rag_wiki.lifecycle.state_machine import StateMachine, InvalidTransitionError
+from rag_wiki.lifecycle.fetch_counter import FetchCounter
+from rag_wiki.lifecycle.decay_engine import DecayEngine, DecayConfig
 
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -155,7 +155,7 @@ class TestDecayEngine:
             doc_title="Doc", doc_path="/kb/doc.pdf",
             user_state=DocumentState.CLAIMED,
             fetch_count=fetch_count,
-            last_fetched_at=datetime.utcnow() - timedelta(days=days_ago),
+            last_fetched_at=datetime.now(timezone.utc) - timedelta(days=days_ago),
             full_content="some content",
         )
         store.upsert(r)
@@ -174,15 +174,15 @@ class TestDecayEngine:
     def test_high_score_transitions_to_pinned(self, decay, store):
         r = self._claimed_record(store, fetch_count=20, days_ago=0)
         r.explicit_signal = 1.0
-        r.pinned_at = datetime.utcnow() - timedelta(days=10)  # already held long enough
+        r.pinned_at = datetime.now(timezone.utc) - timedelta(days=10)  # already held long enough
         store.upsert(r)
-        results = decay.run_for_user("u1", now=datetime.utcnow())
+        results = decay.run_for_user("u1", now=datetime.now(timezone.utc))
         assert results[0].new_state == DocumentState.PINNED
 
     def test_very_low_score_transitions_to_demoted(self, decay, store):
         r = self._claimed_record(store, fetch_count=0, days_ago=200)
         r.explicit_signal = 0.0
-        r.demoted_at = datetime.utcnow() - timedelta(days=10)  # already held long enough
+        r.demoted_at = datetime.now(timezone.utc) - timedelta(days=10)  # already held long enough
         store.upsert(r)
         results = decay.run_for_user("u1")
         assert results[0].new_state == DocumentState.DEMOTED

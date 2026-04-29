@@ -1,5 +1,5 @@
 """
-HybridRetriever — the main entry point.
+RagWikiRetriever — the main entry point.
 
 Orchestrates the three-tier retrieval flow:
   1. PINNED docs  → always injected into context
@@ -19,16 +19,16 @@ from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.callbacks import CallbackManagerForRetrieverRun
 
-from storage.base import DocumentState, StateStore, UserDocRecord
-from storage.sqlite import SQLiteStateStore
-from lifecycle.state_machine import StateMachine
-from lifecycle.fetch_counter import FetchCounter, SuggestionEvent
-from lifecycle.decay_engine import DecayEngine, DecayConfig
-from transparency.provenance import ProvenanceBlock, ProvenanceBuilder
+from rag_wiki.storage.base import DocumentState, StateStore, UserDocRecord
+from rag_wiki.storage.memory import MemoryStateStore
+from rag_wiki.lifecycle.state_machine import StateMachine
+from rag_wiki.lifecycle.fetch_counter import FetchCounter, SuggestionEvent
+from rag_wiki.lifecycle.decay_engine import DecayEngine, DecayConfig
+from rag_wiki.transparency.provenance import ProvenanceBlock, ProvenanceBuilder
 
 
 @dataclass
-class HybridRetrieverConfig:
+class RagWikiRetrieverConfig:
     fetch_threshold:     int   = 3
     no_resiluggest_days: int   = 30
     decay:               DecayConfig = None
@@ -38,19 +38,19 @@ class HybridRetrieverConfig:
             self.decay = DecayConfig()
 
 
-class HybridRetriever(BaseRetriever):
+class RagWikiRetriever(BaseRetriever):
     """
     A LangChain-compatible retriever that adds a personal knowledge cache
     on top of any existing retriever.
 
     Usage:
-        from hybrid_kb import HybridRetriever
-        from hybrid_kb.storage.sqlite import SQLiteStateStore
+        from rag_wiki import RagWikiRetriever
+        from rag_wiki.storage.memory import MemoryStateStore
 
-        retriever = HybridRetriever(
+        retriever = RagWikiRetriever(
             user_id          = "user-123",
             global_retriever = your_existing_retriever,
-            state_store      = SQLiteStateStore("sqlite:///./kb.db"),
+            state_store      = MemoryStateStore(),
         )
 
         # Drop-in replacement anywhere a LangChain retriever is expected:
@@ -71,7 +71,7 @@ class HybridRetriever(BaseRetriever):
     user_id:          str
     global_retriever: Any   # BaseRetriever — typed as Any to avoid Pydantic issues
     state_store:      Any   # StateStore
-    config:           Any   # HybridRetrieverConfig
+    config:           Any   # RagWikiRetrieverConfig
 
     # Internal — not set by caller
     _sm:       Any = None
@@ -86,20 +86,19 @@ class HybridRetriever(BaseRetriever):
     # signature: (event: SuggestionEvent) -> None
     on_suggestion: Optional[Any] = None
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = {"arbitrary_types_allowed": True}
 
     def __init__(
         self,
         user_id:          str,
         global_retriever: BaseRetriever,
         state_store:      Optional[StateStore] = None,
-        config:           Optional[HybridRetrieverConfig] = None,
+        config:           Optional[RagWikiRetrieverConfig] = None,
         on_suggestion:    Optional[Callable[[SuggestionEvent], None]] = None,
         **kwargs,
     ):
-        cfg   = config or HybridRetrieverConfig()
-        store = state_store or SQLiteStateStore()
+        cfg   = config or RagWikiRetrieverConfig()
+        store = state_store or MemoryStateStore()
 
         super().__init__(
             user_id          = user_id,
