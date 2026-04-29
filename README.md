@@ -1,313 +1,189 @@
-# Hybrid RAG + User-Curated Knowledge Base
+# langchain-rag-wiki
 
-## Overview
-
-This project proposes a hybrid knowledge retrieval architecture that combines traditional Retrieval-Augmented Generation (RAG) with a user-driven, persistent knowledge layer.
-
-The system is designed to evolve from a purely probabilistic retrieval model into a semi-deterministic, user-informed knowledge system. It enables the model to learn which documents are consistently useful and prioritize them over time, reducing noise, improving relevance, and increasing transparency.
+A LangChain-compatible retrieval package that adds a **personal, user-curated knowledge layer** on top of any existing RAG retriever. Documents that a user repeatedly retrieves are surfaced as save suggestions; once accepted, they're served directly from a local cache — skipping vector search entirely — with full provenance transparency after every query.
 
 ---
 
-## Motivation
+## Installation
 
-Standard RAG systems suffer from several limitations:
-
-* **Noisy retrieval** due to vector similarity approximations
-* **Loss of document context** caused by chunking
-* **Stateless behavior**, where useful documents are not remembered
-* **Hallucination risk** when combining unrelated chunks
-* **Lack of user control** over what knowledge is considered important
-
-This architecture addresses these issues by introducing:
-
-* Persistent user-level knowledge memory
-* Document-level awareness
-* Retrieval feedback loops
-* Transparent context provenance
-
----
-
-## Core Architecture
-
-The system consists of three main layers:
-
-### 1. Global RAG Layer
-
-* Standard vector database
-* Documents are:
-
-  * Split into chunks
-  * Embedded
-  * Stored with metadata
-
-**Metadata includes:**
-
-* `document_id`
-* `document_title`
-* `section`
-* `source_path`
-* `chunk_index`
-
-This layer is shared across all users and acts as the primary discovery mechanism.
-
----
-
-### 2. User-Local Knowledge Layer
-
-A personalized knowledge base built from documents the user has explicitly or implicitly selected.
-
-**Key properties:**
-
-* Stores documents (or partial documents) promoted from RAG results
-* Acts as a high-priority retrieval source
-* Evolves based on user interaction
-
----
-
-### 3. Transparency / Wiki Layer
-
-A user-facing layer that:
-
-* Displays which documents were used in responses
-* Shows origin and provenance of retrieved chunks
-* Enables users to:
-
-  * Understand context sources
-  * Decide whether to persist documents
-
----
-
-## Retrieval Flow
-
-### Step-by-step pipeline:
-
-1. **User query received**
-
-2. **Local Knowledge Check**
-
-   * Search user-local documents first
-   * If relevant matches found → prioritize them
-
-3. **Global RAG Retrieval**
-
-   * Perform semantic search in vector database
-   * Retrieve top-k chunks
-
-4. **Merge & Rerank**
-
-   * Combine local and global results
-   * Rerank based on:
-
-     * Relevance
-     * Source priority (local > global)
-
-5. **Context Assembly**
-
-   * Construct final prompt context
-   * Maintain document boundaries where possible
-
-6. **Response Generation**
-
-7. **Transparency Output**
-
-   * Show:
-
-     * Which documents were used
-     * Whether they came from:
-
-       * Global RAG
-       * User-local storage
-
----
-
-## Document Promotion Mechanism
-
-A key innovation in this system is **promotion from retrieval to persistent knowledge**.
-
-### Trigger Conditions
-
-Instead of prompting users every time, promotion is based on repeated retrieval patterns.
-
-A document becomes eligible for promotion when:
-
-* Multiple chunks from the same document are retrieved frequently
-* The document consistently ranks high in relevance
-
-### Example Threshold Logic
-
-```python
-promotion_score =
-    frequency_weight * retrieval_count
-  + relevance_weight * avg_similarity
-  + recency_weight * recent_usage
+```bash
+pip install langchain-rag-wiki
 ```
 
-When `promotion_score` exceeds a threshold:
+With optional backends:
 
-* The user is prompted:
-
-  > "This document has been frequently used. Would you like to save it?"
-
----
-
-## Promotion Outcomes
-
-If user accepts:
-
-* Document is added to **User-Local Knowledge Layer**
-* Retrieval priority increases
-* Future queries check this document first
-
-If user declines:
-
-* No action taken
-* System continues tracking usage
+```bash
+pip install 'langchain-rag-wiki[sqlite]'    # SQLAlchemy-backed store
+pip install 'langchain-rag-wiki[redis]'      # Redis-backed store
+pip install 'langchain-rag-wiki[scheduler]'  # APScheduler for decay jobs
+pip install 'langchain-rag-wiki[llama]'      # LlamaIndex adapter
+pip install 'langchain-rag-wiki[dev]'        # pytest + fakeredis + all above
+```
 
 ---
 
-## Storage Strategy
+## Quickstart
 
-Three possible approaches:
+```python
+from langchain_core.documents import Document
+from langchain_core.retrievers import BaseRetriever
+from rag_wiki import RagWikiRetriever, RagWikiRetrieverConfig, MemoryStateStore
 
-### 1. Full Document Storage
+# Wrap any existing LangChain retriever:
+retriever = RagWikiRetriever(
+    user_id="user-123",
+    global_retriever=your_existing_retriever,
+    state_store=MemoryStateStore(),               # zero deps, in-memory
+    config=RagWikiRetrieverConfig(fetch_threshold=3),
+)
 
-* Entire document saved locally
-* Pros: complete context
-* Cons: higher storage cost
-
-### 2. Partial Storage (Chunk + Neighbors)
-
-* Only relevant sections stored
-* Pros: efficient
-* Cons: may miss broader context
-
-### 3. Lazy Reference Model
-
-* Store pointer to original document
-* Fetch full content only when needed
+docs = retriever.invoke("quarterly earnings")
+print(retriever.last_provenance.render())         # see what was used
+```
 
 ---
 
-## Decay & Feedback Loop
+## Connecting to a Real Vector DB
 
-To prevent overfitting:
+### Chroma
 
-* Documents are not permanently prioritized
-* Relevance is continuously evaluated
+```python
+from langchain_chroma import Chroma
+from langchain_openai import OpenAIEmbeddings
 
-### Decay Factors:
+vectorstore = Chroma(
+    collection_name="my_docs",
+    embedding_function=OpenAIEmbeddings(),
+    persist_directory="./chroma_db",
+)
+global_retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
-* Lack of recent usage
-* Lower relevance scores over time
+retriever = RagWikiRetriever(
+    user_id="user-1",
+    global_retriever=global_retriever,
+)
+```
 
-### Result:
+### Pinecone
 
-* Frequently used documents → stay prioritized
-* Irrelevant ones → gradually demoted
+```python
+from langchain_pinecone import PineconeVectorStore
+from langchain_openai import OpenAIEmbeddings
 
----
+vectorstore = PineconeVectorStore(
+    index_name="my-index",
+    embedding=OpenAIEmbeddings(),
+)
+global_retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
 
-## Retrieval Prioritization Strategy
-
-The system uses a tiered retrieval approach:
-
-1. **User-Local Knowledge**
-2. **Global RAG**
-3. **Merged + Reranked Results**
-
-Local knowledge is prioritized but **never exclusively trusted** to avoid bias and staleness.
-
----
-
-## Benefits
-
-### 1. Reduced Hallucination
-
-* Stronger document grounding
-* Less cross-document mixing
-
-### 2. Improved Retrieval Accuracy
-
-* Learns from user behavior
-* Reduces reliance on similarity alone
-
-### 3. Personalized Knowledge Base
-
-* Adapts to individual users
-* Builds long-term context
-
-### 4. Transparency & Trust
-
-* Clear source attribution
-* Inspectable reasoning context
-
-### 5. Efficiency Gains
-
-* Fewer repeated vector searches
-* Faster responses for known topics
+retriever = RagWikiRetriever(
+    user_id="user-1",
+    global_retriever=global_retriever,
+)
+```
 
 ---
 
-## Challenges & Considerations
+## Configuration
 
-### Threshold Tuning
+### RagWikiRetrieverConfig
 
-* Too low → user fatigue
-* Too high → missed opportunities
+| Parameter             | Type  | Default | Description                                         |
+|-----------------------|-------|---------|-----------------------------------------------------|
+| `fetch_threshold`     | `int` | `3`     | Fetches before a save suggestion fires               |
+| `no_resiluggest_days` | `int` | `30`    | Days to wait before re-suggesting a declined doc     |
+| `decay`               | `DecayConfig` | *(see below)* | Decay engine settings              |
 
-### Storage Management
+### DecayConfig
 
-* Handling large documents
-* Version control for updated sources
-
-### Query Routing Complexity
-
-* Balancing local vs global retrieval
-* Avoiding bias toward old data
-
-### Cold Start Problem
-
-* System behaves like standard RAG initially
-* Improves over time with usage
-
----
-
-## Future Improvements
-
-* Automatic topic/domain clustering
-* Smarter promotion scoring models
-* Cross-user shared learning (optional)
-* UI enhancements for document exploration
-* Version-aware document tracking
+| Parameter              | Type    | Default | Description                                      |
+|------------------------|---------|---------|--------------------------------------------------|
+| `w_recency`            | `float` | `0.5`   | Weight for recency factor in decay score         |
+| `w_frequency`          | `float` | `0.3`   | Weight for frequency factor                      |
+| `w_explicit`           | `float` | `0.2`   | Weight for explicit user signals                 |
+| `decay_lambda`         | `float` | `0.05`  | Exponential decay steepness (λ)                  |
+| `freq_cap`             | `int`   | `20`    | Max fetch count for frequency normalization      |
+| `pin_threshold`        | `float` | `0.85`  | Score above which a doc is auto-pinned           |
+| `demotion_threshold`   | `float` | `0.15`  | Score below which a doc is auto-demoted          |
+| `pin_hold_days`        | `int`   | `7`     | Days score must hold before pin fires            |
+| `demotion_hold_days`   | `int`   | `3`     | Days score must hold before demotion fires       |
 
 ---
 
-## Use Cases
+## Running the Decay Scheduler
 
-* Developer documentation assistants
-* Research tools
-* Enterprise knowledge systems
-* Legal and academic workflows
-* Personal knowledge management systems
+```python
+from rag_wiki import DecayEngine, DecayConfig
+from rag_wiki.lifecycle.state_machine import StateMachine
+from rag_wiki.scheduler import DecayScheduler
+from rag_wiki.storage.memory import MemoryStateStore
+
+store  = MemoryStateStore()
+engine = DecayEngine(store, StateMachine(), config=DecayConfig())
+
+# Simple backend (zero extra deps):
+scheduler = DecayScheduler(engine, store, backend="simple", interval_hours=24)
+scheduler.start()
+
+# Or with APScheduler:
+# scheduler = DecayScheduler(engine, store, backend="apscheduler", interval_hours=24)
+
+# Manual triggers:
+scheduler.run_now("user-123")
+scheduler.run_all_users()
+
+scheduler.stop()
+```
 
 ---
 
-## Summary
+## Swapping Storage Backends
 
-This architecture extends traditional RAG by introducing a user-driven memory layer that transforms retrieval from a stateless process into a continuously learning system.
+### Memory (default, zero deps)
 
-Instead of repeatedly searching for relevant information, the system learns what matters to the user and adapts accordingly—balancing global knowledge discovery with personalized, persistent context.
+```python
+from rag_wiki.storage.memory import MemoryStateStore
+store = MemoryStateStore()
+```
+
+### SQLite (persistent, single-file)
+
+```python
+from rag_wiki.storage.sqlite import SQLiteStateStore
+store = SQLiteStateStore("sqlite:///./rag_wiki.db")
+```
+
+### Redis (distributed, production)
+
+```python
+import redis
+from rag_wiki.storage.redis_store import RedisStateStore
+
+client = redis.Redis(host="localhost", port=6379, db=0)
+store = RedisStateStore(client)
+```
+
+Pass any store to `RagWikiRetriever(state_store=store)`.
+
+---
+
+## Retrieval Priority Order
+
+1. **PINNED** — always injected into context
+2. **CLAIMED** — served from local cache (skips vector search)
+3. **Global RAG** — fallback vector similarity search
+
+---
+
+## Running Tests
+
+```bash
+pip install 'langchain-rag-wiki[dev]'
+pytest tests/ -v
+```
 
 ---
 
 ## License
 
-MIT License (or specify your preferred license)
-
----
-
-## Contributing
-
-Contributions are welcome. Please open issues or submit pull requests for improvements, ideas, or bug fixes.
-
----
+MIT

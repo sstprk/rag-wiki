@@ -68,3 +68,8 @@ class StateStore(ABC):
     def delete(self, user_id: str, doc_id: str) -> None:
         """Remove a record entirely (used on demotion to GLOBAL)."""
         ...
+
+    @abstractmethod
+    def list_active_users(self) -> list[str]:
+        """Return distinct user_ids that have at least one CLAIMED or PINNED doc."""
+        ...

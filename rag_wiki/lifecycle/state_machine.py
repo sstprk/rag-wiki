@@ -3,10 +3,10 @@ StateMachine — pure logic, no I/O.
 Defines valid transitions and applies them to UserDocRecord instances.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
-from hybrid_kb.storage.base import DocumentState, UserDocRecord
+from rag_wiki.storage.base import DocumentState, UserDocRecord
 
 
 # Valid transitions: state → set of states it can move to
@@ -49,7 +49,7 @@ class StateMachine:
                 f"for doc_id={record.doc_id!r}"
             )
 
-        now = now or datetime.utcnow()
+        now = now or datetime.now(timezone.utc)
         record.user_state = to
 
         if to == DocumentState.CLAIMED:
@@ -92,5 +92,5 @@ class StateMachine:
             doc_path   = doc_path,
             user_state = DocumentState.SURFACED,
             fetch_count = 1,
-            last_fetched_at = datetime.utcnow(),
+            last_fetched_at = datetime.now(timezone.utc),
         )

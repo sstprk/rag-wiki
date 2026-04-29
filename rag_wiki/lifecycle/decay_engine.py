@@ -12,11 +12,20 @@ Score formula:
 
 import math
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from hybrid_kb.storage.base import DocumentState, StateStore, UserDocRecord
-from hybrid_kb.lifecycle.state_machine import StateMachine
+from rag_wiki.storage.base import DocumentState, StateStore, UserDocRecord
+from rag_wiki.lifecycle.state_machine import StateMachine
+
+
+def _ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Normalise a datetime to UTC-aware. Naive datetimes are assumed UTC."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 @dataclass
@@ -109,7 +118,7 @@ class DecayEngine:
         record = self._store.get(user_id, doc_id)
         if record is None:
             return
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         record = self._sm.transition(record, DocumentState.DEMOTED, now=now)
         record.decay_score          = 0.0
         record.no_resiluggest_until = now + timedelta(days=30)
@@ -128,7 +137,7 @@ class DecayEngine:
 
         Call once per day per user from your scheduler.
         """
-        now     = now or datetime.utcnow()
+        now     = now or datetime.now(timezone.utc)
         records = self._store.list_for_decay(user_id)
         results = []
 
@@ -158,12 +167,13 @@ class DecayEngine:
         record: UserDocRecord,
         now: Optional[datetime] = None,
     ) -> float:
-        now = now or datetime.utcnow()
+        now = _ensure_utc(now) or datetime.now(timezone.utc)
         cfg = self._cfg
 
         # Recency factor — exponential decay from last fetch
-        if record.last_fetched_at:
-            days = (now - record.last_fetched_at).total_seconds() / 86400
+        last_fetched = _ensure_utc(record.last_fetched_at)
+        if last_fetched:
+            days = (now - last_fetched).total_seconds() / 86400
             recency = math.exp(-cfg.decay_lambda * days)
         else:
             recency = 0.0
@@ -202,14 +212,14 @@ class DecayEngine:
                 if record.pinned_at is None:
                     record.pinned_at = now   # stamp candidate, transition next cycle
                 else:
-                    days_held = (now - record.pinned_at).days
+                    days_held = (now - _ensure_utc(record.pinned_at)).days
                     if days_held >= cfg.pin_hold_days:
                         record = self._sm.transition(record, DocumentState.PINNED, now=now)
             elif score < cfg.demotion_threshold:
                 if record.demoted_at is None:
                     record.demoted_at = now
                 else:
-                    days_held = (now - record.demoted_at).days
+                    days_held = (now - _ensure_utc(record.demoted_at)).days
                     if days_held >= cfg.demotion_hold_days:
                         record = self._sm.transition(record, DocumentState.DEMOTED, now=now)
             else:
@@ -224,7 +234,7 @@ class DecayEngine:
                 if record.demoted_at is None:
                     record.demoted_at = now
                 else:
-                    days_held = (now - record.demoted_at).days
+                    days_held = (now - _ensure_utc(record.demoted_at)).days
                     if days_held >= cfg.demotion_hold_days:
                         record = self._sm.transition(record, DocumentState.DEMOTED, now=now)
 

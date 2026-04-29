@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "langchain-rag-wiki"
+version = "0.1.0"
+description = "LangChain-compatible hybrid knowledge base retrieval with user-curated personal KB layer"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "sstprk" },
+]
+keywords = ["langchain", "rag", "retrieval", "knowledge-base", "hybrid"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "langchain-core>=0.1.0",
+]
+
+[project.optional-dependencies]
+sqlite = ["sqlalchemy>=2.0"]
+redis = ["redis>=4.0"]
+llama = ["llama-index-core>=0.10"]
+scheduler = ["apscheduler>=3.0"]
+dev = [
+    "pytest",
+    "fakeredis",
+    "sqlalchemy>=2.0",
+    "apscheduler>=3.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/sstprk/rag-wiki"
+Repository = "https://github.com/sstprk/rag-wiki"
+
+[tool.hatch.build.targets.wheel]
+packages = ["rag_wiki"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

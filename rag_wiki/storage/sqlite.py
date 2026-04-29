@@ -3,7 +3,7 @@ SQLiteStateStore — zero-infrastructure backend for local dev and small deploym
 Uses SQLAlchemy Core (not ORM) for minimal overhead and maximum portability.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import (
@@ -15,7 +15,7 @@ from .base import StateStore, UserDocRecord, DocumentState
 
 
 def _now() -> datetime:
-    return datetime.utcnow()
+    return datetime.now(timezone.utc)
 
 
 class SQLiteStateStore(StateStore):
@@ -23,12 +23,12 @@ class SQLiteStateStore(StateStore):
     SQLite-backed state store.
 
     Usage:
-        store = SQLiteStateStore("sqlite:///./hybrid_kb.db")
+        store = SQLiteStateStore("sqlite:///./rag_wiki.db")
         # or in-memory for tests:
         store = SQLiteStateStore("sqlite:///:memory:")
     """
 
-    def __init__(self, url: str = "sqlite:///./hybrid_kb.db"):
+    def __init__(self, url: str = "sqlite:///./rag_wiki.db"):
         self._engine = create_engine(url, echo=False)
         self._meta   = MetaData()
         self._table  = self._define_table()
@@ -174,3 +174,18 @@ class SQLiteStateStore(StateStore):
                     self._table.c.doc_id  == doc_id,
                 )
             )
+
+    def list_active_users(self) -> list[str]:
+        """Return distinct user_ids that have at least one CLAIMED or PINNED doc."""
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                select(self._table.c.user_id)
+                .where(
+                    self._table.c.user_state.in_([
+                        DocumentState.CLAIMED.value,
+                        DocumentState.PINNED.value,
+                    ])
+                )
+                .distinct()
+            ).fetchall()
+        return sorted(row.user_id for row in rows)

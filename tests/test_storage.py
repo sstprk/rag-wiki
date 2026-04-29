@@ -5,8 +5,8 @@ Covers: get/upsert/list_claimed/list_pinned/list_for_decay/delete
 
 import pytest
 from datetime import datetime
-from hybrid_kb.storage.base import DocumentState, UserDocRecord
-from hybrid_kb.storage.sqlite import SQLiteStateStore
+from rag_wiki.storage.base import DocumentState, UserDocRecord
+from rag_wiki.storage.sqlite import SQLiteStateStore
 
 
 @pytest.fixture
