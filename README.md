@@ -239,7 +239,9 @@ rag-wiki/
     └── 0001-initial-design.md ← Formal RFC
 ```
 
----
+```python
+import redis
+from rag_wiki.storage.redis_store import RedisStateStore
 
 ## Status
 
