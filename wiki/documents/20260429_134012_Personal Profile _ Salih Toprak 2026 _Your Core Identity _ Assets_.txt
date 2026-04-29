@@ -1,0 +1,23 @@
+Name: Salih Toprak
+Nationality: Turkish
+Current location: Lisbon, Portugal (remote/hybrid possible)
+Current role: Data Scientist Intern at 5 Steps Real Estate (Sep 2025–Present) + Part-time Software Developer at Dijital Atölyemiz (Oct 2025–Present)
+
+Education:
+- B.Sc. Software Engineering, Manisa Celal Bayar University (MCBÜ), expected Jul 2026, GPA 3.35–3.45/4.00 (projected "Very Good" in ECTS)
+- Erasmus+ Exchange, Kaunas University of Technology (KTU), Lithuania, Feb–Jun 2024 (Informatics)
+
+Key Research & Publications:
+- IEEE BCCA 2025 paper: "Proof of AutoML: SDN based Secure Energy Trading with Blockchain in Disaster Case" (co-author M. Erel-Özçevik). Focus: AutoML + SDN + Blockchain for resilient P2P energy trading in disasters.
+- 2209-B TÜBİTAK Capstone: Real-time network congestion prediction with Wireshark + ML models.
+
+Internships & Projects:
+- Real Estate Lisbon: Built LLM-powered news summarization, personalized recommendation pipelines, end-to-end data ingestion/processing.
+- Manisa Celal Bayar University Research Internship: SDN-Blockchain-AutoML energy trading system.
+- Bahçeşehir University: Biosignal processing + GUI for biomechanics.
+- SHeng International Training (Transilvania Univ.): Smart Healthcare Engineering.
+
+Technical Skills (2026 level): Python, AutoML, LLMs, Machine Learning (Scikit-learn, PyTorch), Data Pipelines, Blockchain, SDN, NumPy/Pandas, Git, Wireshark, Recommender Systems, Signal Processing.
+Soft Skills: B2 English (MOI certified via MCBÜ), international collaboration, research dissemination.
+
+Strengths for Europe: Existing KTU Erasmus history, IEEE publication, current Lisbon tech internship, no IELTS needed (MOI + university interview route available).

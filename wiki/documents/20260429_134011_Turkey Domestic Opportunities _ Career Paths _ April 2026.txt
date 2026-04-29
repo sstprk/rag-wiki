@@ -1,0 +1,40 @@
+Turkey Domestic Trajectory 2026 (High-Alignment Alternative to Europe)
+
+Current Advantages for Salih Toprak:
+- Turkish citizen, MCBÜ Software Engineering (GPA 3.35–3.45), IEEE BCCA 2025 publication on SDN + AutoML + Blockchain for disaster energy trading.
+- Existing TÜBİTAK 2209-B Capstone + research internship experience → strong weighting in national scholarship evaluations.
+- Current Lisbon internship (Real Estate AI/LLM pipelines) can be leveraged as “international experience” or remote/hybrid continuation.
+
+TÜBİTAK 2210 National MSc/MA Scholarships (2026 Cycle):
+- 2210-A (General), 2210-C (Priority Fields: AI, Computing & Information Technology, Energy), 2210-D (Industrial MSc – company co-funded).
+- Stipend: up to 19,000 TRY/month (full/partial) + tuition coverage for up to 24 months.
+- 2026/1 call closed 24 March 2026; next 2026/2 call opens October 2026.
+- Priority for applicants with publications, TÜBİTAK project history, and AI/energy research → very high acceptance probability for your profile.
+- Top target programs: Boğaziçi University (Data Science & AI M.Sc.), Gebze Technical University (Data Science & Artificial Intelligence), Middle East Technical University (METU) or Istanbul Technical University (ITU) – all English-taught options available.
+
+National AI Strategy & Energy Sector Alignment (2026):
+- Updated 2024–2025 Action Plan + 2026 emphasis: AI contribution to GDP target, 1 GW data-center capacity by 2030, HIT-30 high-tech investment program ($30B by 2030).
+- Strategic focus: Smart Grids, Virtual Power Plants (VPP), renewable integration, AI-driven energy optimization, blockchain for secure energy trading.
+- Direct match with your IEEE paper: Government & private sector (TEİAŞ, renewable firms, E.ON-equivalent local players) actively seeking SDN/Blockchain/AutoML talent for disaster-resilient grids and Green Deal-style projects.
+- Dual-use tech push (defense + civilian energy) creates fast-track R&D roles.
+
+Industry Job Market (Istanbul/Ankara 2026):
+- High demand for ML Engineers / Data Scientists with AI + energy/domain knowledge.
+- Entry-level total comp: ~1.0–1.7M TRY/year (Data Scientist ~1.28M TRY median; ML Engineer 1.9–2.0M TRY in Istanbul).
+- Mid-level (post-Master’s 2028): 2.5M+ TRY/year possible in energy-tech or fintech.
+- Companies/hubs: Istanbul Tech ecosystem (60% of talent), energy firms investing in smart grids, startups in blockchain energy trading.
+- No visa/work-permit barriers; immediate full-time transition possible after graduation or even during Master’s (2210-D industrial track allows company employment).
+
+Pros vs Europe:
+- Zero relocation cost, family/network proximity, lower living expenses.
+- Faster entry into paid roles; TÜBİTAK-funded Master’s + part-time industry work common.
+- Direct contribution to national smart-grid/renewable projects (perfect IEEE paper leverage).
+
+Cons vs Europe:
+- Lower absolute salaries and slower Blue Card/PR path.
+- Less international exposure unless hybrid/remote Europe work is maintained.
+
+Immediate Turkey Actions (April 2026):
+- Prepare for TÜBİTAK 2210/2 (October 2026) – update CV with latest Lisbon LLM pipelines.
+- Apply to domestic English-taught AI/Data Science M.Sc. programs (many have rolling or fall 2026 intake).
+- Network with TEİAŞ, local renewable firms, or extend Lisbon role remotely while studying in Turkey.
