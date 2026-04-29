@@ -5,7 +5,7 @@
 **RAG meets wiki-style provenance.**  
 Surfaces documents, learns from usage, and lets users build personal knowledge bases on top of shared vector stores.
 
-[![PyPI version](https://img.shields.io/pypi/v/langchain-rag-wiki.svg)](https://pypi.org/project/langchain-rag-wiki/)
+[![PyPI version](https://img.shields.io/pypi/v/langchain-rag-wiki.svg)](https://pypi.org/project/langchain-rag-wiki/) 
 [![Python](https://img.shields.io/pypi/pyversions/langchain-rag-wiki.svg)](https://pypi.org/project/langchain-rag-wiki/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Tests](https://img.shields.io/github/actions/workflow/status/sstprk/rag-wiki/tests.yml?label=tests)](https://github.com/sstprk/rag-wiki/actions)
