@@ -1,284 +1,412 @@
 <div align="center">
 
-# 🧠 rag-wiki
+# langchain-rag-wiki
 
-**A hybrid RAG architecture that builds personal knowledge bases through usage.**
+**RAG meets wiki-style provenance.**  
+Surfaces documents, learns from usage, and lets users build personal knowledge bases on top of shared vector stores.
 
-*Combines vector retrieval, document provenance, and adaptive user curation — so your knowledge base gets smarter the more you use it.*
+[![PyPI version](https://img.shields.io/pypi/v/langchain-rag-wiki.svg)](https://pypi.org/project/langchain-rag-wiki/)
+[![Python](https://img.shields.io/pypi/pyversions/langchain-rag-wiki.svg)](https://pypi.org/project/langchain-rag-wiki/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Tests](https://img.shields.io/github/actions/workflow/status/sstprk/rag-wiki/tests.yml?label=tests)](https://github.com/sstprk/rag-wiki/actions)
+[![Contributing](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Status: RFC / Spec](https://img.shields.io/badge/Status-RFC%20%2F%20Spec-yellow.svg)]()
-[![Integrations: LangChain · VS Code](https://img.shields.io/badge/Integrations-LangChain%20%C2%B7%20VS%20Code-green.svg)]()
-[![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen.svg)](CONTRIBUTING.md)
+[Installation](#installation) · [Quickstart](#quickstart) · [How It Works](#how-it-works) · [Real Vector DB Setup](#connecting-to-a-real-vector-db) · [Configuration](#configuration) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
 ---
 
-## The Problem with Standard RAG
+## What Is This?
 
-Standard RAG pipelines retrieve document chunks based on vector similarity. This works well at scale, but has a fundamental limitation: **every query is stateless**. The system has no memory of what was relevant before, no sense of which documents a specific user relies on, and no way to prefer a known-good source over a probabilistically similar one.
+Standard RAG is stateless — every query hits the vector database fresh, returns probabilistic results, and forgets what was useful last time.
 
-The result is a retrieval system that is:
+`langchain-rag-wiki` wraps any LangChain retriever and adds a personal knowledge layer on top:
 
-- **Noisy** — chunks from unrelated documents can outscore the right one
-- **Opaque** — the user has no visibility into where the context came from
-- **Flat** — all documents are treated equally, regardless of proven relevance
-- **Amnesiac** — patterns of use are never learned or acted on
+- Documents retrieved repeatedly get **suggested for saving** after a configurable threshold
+- Once saved, they're served from a **local cache** — no vector search, deterministic results
+- Every response shows a **provenance block** so you always know which document was used and from where
+- A **decay model** keeps the cache honest — stale documents fade out automatically
 
----
-
-## The rag-wiki Approach
-
-rag-wiki layers three things on top of standard RAG:
-
-### 1. Origin Metadata at Split Time
-Every chunk in the vector database carries rich metadata back to its source document — `doc_id`, `doc_title`, `section`, `domain_tags`, timestamps. This metadata is the foundation of the entire system. It turns isolated chunks back into traceable artifacts.
-
-### 2. A Personal Document Cache
-When a document surfaces repeatedly for a user, the system promotes it: the full origin document is fetched and stored in the user's personal cache. Future queries check this cache **first** — deterministically, by semantic match — and only fall back to the global vector search on a miss. A user's known-relevant documents are never at risk of being outscored by noise.
-
-### 3. Wiki-Style Provenance + Adaptive Feedback Loop
-Every response that uses RAG context shows the user exactly where it came from. Hit counters track retrieval frequency per user per document. When a document crosses a threshold, the user is prompted — once, non-intrusively — to save it. From there, a decay and promotion mechanism continuously re-ranks each document's priority based on actual usage. Documents that prove consistently relevant get pinned. Documents that stop being retrieved decay gracefully out of the active layer.
+It's a drop-in `BaseRetriever`. Any LangChain chain, agent, or RAG pipeline that accepts a retriever works with it immediately.
 
 ---
 
-## Architecture Overview
+## Installation
 
+```bash
+pip install langchain-rag-wiki
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        INCOMING QUERY                       │
-└───────────────────────────────┬─────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────┐
-│              TIER 2 — USER LOCAL DOCUMENT CACHE             │
-│                                                             │
-│   Semantic match against user's claimed / pinned files      │
-│   ✓ HIT  → inject full document, skip global search         │
-│   ✗ MISS → fall through to Tier 1                           │
-└───────────────────────────────┬─────────────────────────────┘
-                                │ (miss only)
-                                ▼
-┌─────────────────────────────────────────────────────────────┐
-│              TIER 1 — GLOBAL RAG LAYER                      │
-│                                                             │
-│   Vector similarity search → chunk + origin metadata        │
-│   Increment hit_count[doc_id] for this user                 │
-│   Check if hit_count >= SURFACE_THRESHOLD                   │
-└───────────────────────────────┬─────────────────────────────┘
-                                │
-                                ▼
-┌─────────────────────────────────────────────────────────────┐
-│           TIER 3 — TRANSPARENCY + CURATION LAYER            │
-│                                                             │
-│   Surface: source doc name, section, hit count              │
-│   On threshold: "This file came up 3× — save to library?"   │
-│   On save: fetch full doc → store in Tier 2 cache           │
-└─────────────────────────────────────────────────────────────┘
+
+With optional backends:
+
+```bash
+pip install 'langchain-rag-wiki[sqlite]'     # SQLite persistent store
+pip install 'langchain-rag-wiki[redis]'       # Redis distributed store
+pip install 'langchain-rag-wiki[scheduler]'   # APScheduler decay jobs
+pip install 'langchain-rag-wiki[llama]'       # LlamaIndex adapter
+pip install 'langchain-rag-wiki[dev]'         # all of the above + pytest + fakeredis
 ```
 
 ---
 
-## Document State Machine
+## Quickstart
 
-Each document progresses through states based on retrieval frequency and user action:
-
-```
-  [Global-Only]
-       │
-       │ first retrieval
-       ▼
-  [Surfaced] ◄─────────────── (user skips, counter resets)
-       │
-       │ hit_count >= SURFACE_THRESHOLD
-       ▼
-  [Candidate] ──── user skips ────► (back to Surfaced, reset)
-       │
-       │ user saves
-       ▼
-  [Claimed]
-       │                    │
-       │ consistent usage   │ inactivity > DECAY_WINDOW
-       ▼                    ▼
- [Domain-Pinned]        [Archived]
-       │                    │
-       │ inactivity         │ re-queried
-       ▼                    ▼
-   [Claimed]            [Surfaced]
-```
-
-| State | What it means | Retrieval behavior |
-|---|---|---|
-| **Global-Only** | Never retrieved by this user | Standard vector search |
-| **Surfaced** | Retrieved ≥ 1×, below threshold | Standard vector search + counter |
-| **Candidate** | Threshold reached, prompt shown | Standard vector search |
-| **Claimed** | User saved to personal cache | Local cache checked first |
-| **Domain-Pinned** | Consistently relevant, auto-injected | Always injected for matching domain |
-| **Archived** | Was claimed, fell out of use | Removed from priority path; restarts on re-query |
-
----
-
-## Threshold & Promotion Logic
-
-The save prompt fires **once per threshold crossing** — not on every query. This keeps the UX clean.
-
-```
-Default: SURFACE_THRESHOLD = 3
-```
-
-- Multiple chunks from the same document in a single query count as **one** increment (no inflation from dense documents)
-- If the user skips, the counter resets. The document will surface again after another full threshold cycle.
-- The prompt is non-blocking — it appears after the response, never before
-
-**Example prompt:**
-
-```
-📂 "API Rate Limiting — Reference Guide" has come up 3 times.
-   Save it to your personal library for faster access?
-
-   [Save to Library]   [Not now]
-```
-
----
-
-## Decay & Feedback Loop
-
-Claimed documents that stop being retrieved begin to decay, preventing the personal cache from becoming stale.
-
-```
-decay_score = (days_since_last_retrieved / DECAY_WINDOW) × base_weight
-```
-
-When `decay_score` exceeds `ARCHIVE_THRESHOLD`, the document moves to **Archived** — not deleted, just removed from the priority retrieval path.
-
-For documents that prove consistently relevant across many sessions, **Domain Pinning** promotes them to automatic context injection:
-
-- Claimed for at least `MIN_CLAIMED_DAYS` (default: 7)
-- Retrieved across at least `DOMAIN_PIN_SESSIONS` distinct sessions (default: 5)
-- Average relevance score above `DOMAIN_PIN_SCORE_FLOOR` (default: 0.75)
-
-The combined effect: a living personal knowledge base that self-organizes around actual usage patterns rather than one-time decisions.
-
----
-
-## Planned Integrations
-
-### 🔗 LangChain Plugin
-A custom `HybridCacheRetriever` that wraps any standard LangChain retriever and adds the caching, hit counting, and promotion logic as a composable layer. Drop it into any existing LangChain chain without changing the rest of your pipeline.
+Zero infrastructure — uses in-memory state. No API keys needed.
 
 ```python
-# Planned interface (spec — not yet implemented)
-from rag_wiki.langchain import HybridCacheRetriever
+from rag_wiki import RagWikiRetriever, RagWikiRetrieverConfig, MemoryStateStore
 
-retriever = HybridCacheRetriever(
-    base_retriever=your_existing_vectorstore_retriever,
-    user_id="user_123",
-    cache_store=LocalDocumentCache("./user_cache"),
-    surface_threshold=3,
+retriever = RagWikiRetriever(
+    user_id          = "user-123",
+    global_retriever = your_existing_retriever,  # any LangChain BaseRetriever
+    state_store      = MemoryStateStore(),
+    config           = RagWikiRetrieverConfig(fetch_threshold=3),
 )
 
-# Use it like any other LangChain retriever
-docs = retriever.get_relevant_documents("your query")
+docs = retriever.invoke("quarterly earnings report")
+print(retriever.last_provenance.render())  # see what was retrieved and from where
 ```
 
-### 🖥️ VS Code Extension
-An IDE-level integration that surfaces the provenance layer inline while you work. When the AI assistant retrieves context from your knowledge base, the extension shows a source badge in the editor. Repeated retrievals trigger the save prompt directly in the IDE sidebar — no context switching.
+Run the bundled demo (no API keys, no services required):
 
-**Planned UX:**
-- Source badge on AI suggestions: `📄 contracts/sla-template.md · retrieved 2×`
-- Sidebar panel: personal document library with state indicators
-- Command palette: `RAG Wiki: View my knowledge base`, `RAG Wiki: Pin document`
+```bash
+python example.py
+```
 
 ---
 
-## Configuration Reference
+## How It Works
 
-| Parameter | Default | Description |
-|---|---|---|
-| `SURFACE_THRESHOLD` | `3` | Retrievals before save prompt |
-| `DECAY_WINDOW` | `30 days` | Inactivity window before decay |
-| `ARCHIVE_THRESHOLD` | `0.8` | Decay score that triggers archive |
-| `DOMAIN_PIN_SESSIONS` | `5` | Sessions needed for domain pinning |
-| `MIN_CLAIMED_DAYS` | `7` | Min days claimed before pin eligible |
-| `DOMAIN_PIN_SCORE_FLOOR` | `0.75` | Min avg relevance for pinning |
-| `COUNTER_RESET_ON_SKIP` | `true` | Reset counter when user skips prompt |
-| `MULTI_CHUNK_COUNT_ONCE` | `true` | Multiple chunks from same doc = 1 hit |
+Every query goes through three retrieval tiers in order:
+
+```
+1. PINNED docs    → always injected into context (user explicitly pinned these)
+2. CLAIMED cache  → direct local lookup, skips vector search entirely
+3. Global RAG     → fallback to your existing vector retriever
+```
+
+### Document Lifecycle
+
+Documents move through six states based on usage patterns:
+
+```
+GLOBAL → SURFACED → SUGGESTED → CLAIMED → PINNED
+                ↘               ↙
+                  DEMOTED ──────
+```
+
+| State | What it means | Retrieval path |
+|-------|--------------|----------------|
+| `GLOBAL` | In the shared vector DB only | Vector similarity search |
+| `SURFACED` | Retrieved at least once; counter is active | Vector search (counter increments) |
+| `SUGGESTED` | Fetch count ≥ threshold; user prompted once | Vector search (pending decision) |
+| `CLAIMED` | User saved it; full doc in local cache | Direct local lookup |
+| `PINNED` | Consistently relevant; auto-promoted | Always injected into context |
+| `DEMOTED` | Usage dropped; evicted from cache | Returns to vector search |
+
+### Threshold and Suggestion
+
+The save suggestion fires **once** when a document has been retrieved `fetch_threshold` times (default: 3). If the user declines, it won't re-surface for `no_resiluggest_days` (default: 30 days). The `reset_threshold` setting resets the fetch count if the document hasn't appeared in that many consecutive queries — so only genuinely recurring documents get suggested.
+
+### Decay Model
+
+A background job recomputes each document's relevance score daily:
+
+```
+decay_score = weighted_avg(
+    recency_factor   = exp(-λ × days_since_last_fetch),
+    frequency_factor = min(fetch_count / freq_cap, 1.0),
+    explicit_signal  = thumbs_up / thumbs_down value,
+)
+```
+
+Documents above `pin_threshold` (0.85) get auto-pinned after `pin_hold_days`. Documents below `demotion_threshold` (0.15) get evicted after `demotion_hold_days`.
+
+### Provenance Block
+
+After every query, `retriever.last_provenance.render()` outputs:
+
+```
+────────────────────────────────────────────────────────────
+📄 Sources used in this response
+  • Kubernetes Pod Basics [from your KB]
+    Chunks 0, 2 of 5  |  Saved to your KB
+  • Docker Image Guide
+    Chunks 1 of 8  |  SURFACED (fetched 2×)
+
+💡 "Docker Image Guide" has appeared in your queries 3 times.
+   Would you like to save it to your personal knowledge base?
+
+   [ Save to my KB ]   [ Not now ]
+────────────────────────────────────────────────────────────
+```
+
+The provenance block is also available as a structured dict via `retriever.last_provenance.to_dict()` for API consumers.
 
 ---
 
-## Why This Isn't Just Standard RAG with a Cache
+## Connecting to a Real Vector DB
 
-A few things that make this architecture distinct from simply caching retrieval results:
+### Ingesting Documents
 
-- **The cache stores full documents, not chunks.** Once a document is claimed, future queries get the full coherent source — not fragments. This dramatically reduces chunk-blending hallucinations.
-- **The promotion trigger is behavioral, not manual.** Users don't manage a knowledge base explicitly. The system learns from query patterns and only asks for confirmation when it has strong evidence of relevance.
-- **The decay loop is continuous.** The personal cache is not a static store. Documents that lose relevance are automatically deprioritized without the user having to curate anything.
-- **Provenance is first-class.** Every retrieval is traceable. The user always knows which document answered their question and how often it has been relied on.
+Use the included `ingest.py` as a starting point. It loads `.txt` files from a folder, splits them into chunks, injects the required metadata, and stores them in Chroma using Ollama embeddings:
+
+```bash
+python ingest.py
+```
+
+The metadata fields `doc_id`, `doc_title`, and `doc_path` on each chunk are what connect the vector store to the lifecycle tracking system. Without them, fetch counting and cache promotion won't work. If you write your own ingestion pipeline, make sure every chunk carries these fields.
+
+### Chroma + Ollama (fully local, no API key)
+
+```python
+from langchain_chroma import Chroma
+from langchain_ollama import OllamaEmbeddings
+from rag_wiki import RagWikiRetriever, MemoryStateStore
+
+vectorstore = Chroma(
+    collection_name    = "my_docs",
+    embedding_function = OllamaEmbeddings(model="nomic-embed-text:latest"),
+    persist_directory  = "./chroma_db",
+)
+
+retriever = RagWikiRetriever(
+    user_id          = "user-1",
+    global_retriever = vectorstore.as_retriever(search_kwargs={"k": 5}),
+    state_store      = MemoryStateStore(),
+)
+
+docs = retriever.invoke("your query here")
+print(retriever.last_provenance.render())
+```
+
+### Chroma + OpenAI
+
+```python
+from langchain_chroma import Chroma
+from langchain_openai import OpenAIEmbeddings
+from rag_wiki import RagWikiRetriever, MemoryStateStore
+
+vectorstore = Chroma(
+    collection_name    = "my_docs",
+    embedding_function = OpenAIEmbeddings(),
+    persist_directory  = "./chroma_db",
+)
+
+retriever = RagWikiRetriever(
+    user_id          = "user-1",
+    global_retriever = vectorstore.as_retriever(search_kwargs={"k": 5}),
+    state_store      = MemoryStateStore(),
+)
+```
+
+### Pinecone
+
+```python
+from langchain_pinecone import PineconeVectorStore
+from langchain_openai import OpenAIEmbeddings
+from rag_wiki import RagWikiRetriever, MemoryStateStore
+
+vectorstore = PineconeVectorStore(
+    index_name = "my-index",
+    embedding  = OpenAIEmbeddings(),
+)
+
+retriever = RagWikiRetriever(
+    user_id          = "user-1",
+    global_retriever = vectorstore.as_retriever(search_kwargs={"k": 5}),
+    state_store      = MemoryStateStore(),
+)
+```
 
 ---
 
-## Repository Structure
+## User Actions
 
+After retrieving documents, users can provide explicit signals:
+
+```python
+# User confirmed: save this document to personal KB
+retriever.accept_suggestion(doc_id="doc-1", full_content="full document text")
+
+# User dismissed: don't ask again for 30 days
+retriever.decline_suggestion(doc_id="doc-1")
+
+# Explicit positive signal — boosts decay score
+retriever.thumbs_up(doc_id="doc-1")
+
+# Explicit negative signal — reduces decay score
+retriever.thumbs_down(doc_id="doc-1")
+
+# Always include this document in every query context
+retriever.force_pin(doc_id="doc-1")
+
+# Remove from personal KB entirely
+retriever.force_remove(doc_id="doc-1")
 ```
-rag-wiki/
-├── README.md
-├── CONTRIBUTING.md
-├── docs/
-│   ├── architecture.md        ← Full system spec
-│   ├── retrieval-flow.md      ← End-to-end query lifecycle
-│   ├── document-states.md     ← State machine detail
-│   ├── decay-feedback.md      ← Decay formula + pinning logic
-│   └── configuration.md      ← All config parameters
-├── integrations/
-│   ├── langchain/
-│   │   └── README.md          ← LangChain plugin interface spec
-│   └── vscode/
-│       └── README.md          ← VS Code extension UX spec
-└── rfcs/
-    └── 0001-initial-design.md ← Formal RFC
+
+---
+
+## Configuration
+
+### `RagWikiRetrieverConfig`
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `fetch_threshold` | `int` | `3` | Fetch count before save suggestion fires |
+| `reset_threshold` | `int` | `3` | Queries without a hit before fetch count resets |
+| `no_resiluggest_days` | `int` | `30` | Days to block re-suggestion after a decline |
+| `wiki_save_dir` | `str \| None` | `None` | Directory to save accepted docs to disk; `None` disables |
+| `decay` | `DecayConfig` | *(see below)* | Decay engine settings |
+
+### `DecayConfig`
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `w_recency` | `float` | `0.5` | Weight for recency in decay score |
+| `w_frequency` | `float` | `0.3` | Weight for frequency |
+| `w_explicit` | `float` | `0.2` | Weight for explicit user signals |
+| `decay_lambda` | `float` | `0.05` | Decay steepness λ (half-life ≈ 14 days) |
+| `freq_cap` | `int` | `20` | Max fetch count for frequency normalisation |
+| `pin_threshold` | `float` | `0.85` | Score above which doc is auto-pinned |
+| `demotion_threshold` | `float` | `0.15` | Score below which doc is auto-demoted |
+| `pin_hold_days` | `int` | `7` | Days score must hold above threshold before pin fires |
+| `demotion_hold_days` | `int` | `3` | Days score must hold below threshold before demotion fires |
+
+---
+
+## Storage Backends
+
+### Memory (default, zero dependencies)
+
+```python
+from rag_wiki import MemoryStateStore
+store = MemoryStateStore()
 ```
+
+Thread-safe dict. Data lost on process restart. Best for development and testing.
+
+### SQLite (single-node persistent)
+
+```python
+from rag_wiki.storage.sqlite import SQLiteStateStore
+store = SQLiteStateStore("sqlite:///./wiki/rag_wiki_state.db")
+```
+
+Persists to a local file. Good for single-server production deployments.
+
+### Redis (distributed)
 
 ```python
 import redis
 from rag_wiki.storage.redis_store import RedisStateStore
 
-## Status
+client = redis.Redis(host="localhost", port=6379, db=0)
+store = RedisStateStore(client)
+```
 
-This repository is currently a **design spec and RFC**. No implementation code exists yet.
+Required when running multiple API workers or load-balancing. Uses Redis hashes and sets for fast state queries.
 
-The goal is to:
-1. Finalize the architecture spec through community feedback
-2. Build the LangChain plugin (`HybridCacheRetriever`) as the first implementation
-3. Build the VS Code extension as the second integration target
-4. Publish as composable, framework-agnostic packages
+Pass any store to the retriever:
+
+```python
+retriever = RagWikiRetriever(
+    user_id          = "user-1",
+    global_retriever = your_retriever,
+    state_store      = store,   # swap freely
+)
+```
+
+---
+
+## Decay Scheduler
+
+Run the decay engine on a background schedule so document states stay current:
+
+```python
+from rag_wiki import DecayEngine, DecayConfig, MemoryStateStore
+from rag_wiki.lifecycle.state_machine import StateMachine
+from rag_wiki.scheduler import DecayScheduler
+
+store     = MemoryStateStore()
+engine    = DecayEngine(store, StateMachine(), config=DecayConfig())
+scheduler = DecayScheduler(engine, store, backend="simple", interval_hours=24)
+
+scheduler.start()
+
+# Manual triggers:
+scheduler.run_now("user-123")   # single user
+scheduler.run_all_users()       # all users with CLAIMED or PINNED docs
+
+scheduler.stop()
+```
+
+Use `backend="apscheduler"` for production (requires `pip install 'langchain-rag-wiki[scheduler]'`).
+
+---
+
+## LlamaIndex Adapter
+
+Wrap any LlamaIndex retriever as a global backend:
+
+```python
+from llama_index.core import VectorStoreIndex
+from rag_wiki.adapters.llamaindex import LlamaIndexRetrieverAdapter
+from rag_wiki import RagWikiRetriever
+
+li_retriever = index.as_retriever(similarity_top_k=5)
+adapter      = LlamaIndexRetrieverAdapter(llama_retriever=li_retriever)
+
+retriever = RagWikiRetriever(
+    user_id          = "user-1",
+    global_retriever = adapter,
+)
+```
+
+Requires `pip install 'langchain-rag-wiki[llama]'`.
+
+---
+
+## Running Tests
+
+```bash
+pip install 'langchain-rag-wiki[dev]'
+pytest tests/ -v
+```
+
+---
+
+## Project Structure
+
+```
+rag_wiki/
+├── __init__.py              # public exports
+├── retriever.py             # RagWikiRetriever — main entry point
+├── scheduler.py             # DecayScheduler (simple + APScheduler backends)
+├── storage/
+│   ├── base.py              # StateStore ABC + UserDocRecord + DocumentState
+│   ├── memory.py            # MemoryStateStore (default, zero deps)
+│   ├── sqlite.py            # SQLiteStateStore
+│   └── redis_store.py       # RedisStateStore
+├── lifecycle/
+│   ├── state_machine.py     # pure transition logic
+│   ├── fetch_counter.py     # threshold tracking + suggestion events
+│   └── decay_engine.py      # scoring + pin/demotion transitions
+├── transparency/
+│   └── provenance.py        # ProvenanceBlock + ProvenanceBuilder
+└── adapters/
+    └── llamaindex.py        # LlamaIndex → LangChain adapter
+```
 
 ---
 
 ## Contributing
 
-This project is in the spec phase — the best contributions right now are **feedback, questions, and challenges to the design**.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for details. Some areas actively looking for input:
-
-- Edge cases in the decay / promotion logic
-- Alternative threshold strategies (time-based vs count-based)
-- Multi-user / team caching scenarios
-- Storage backend options for the local document cache
-- LangChain retriever interface design
-
-Open an issue or start a discussion. All are welcome.
+Contributions are very welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
 
 ---
 
-## Author
+## License
 
-**[sstprk](https://github.com/sstprk)**
-
----
-
-<div align="center">
-
-*If this architecture solves a problem you've hit with RAG — open an issue, leave a star, or reach out.*
-
-</div>
+[MIT](LICENSE)
