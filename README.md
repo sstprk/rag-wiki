@@ -1,313 +1,282 @@
-# Hybrid RAG + User-Curated Knowledge Base
+<div align="center">
 
-## Overview
+# 🧠 rag-wiki
 
-This project proposes a hybrid knowledge retrieval architecture that combines traditional Retrieval-Augmented Generation (RAG) with a user-driven, persistent knowledge layer.
+**A hybrid RAG architecture that builds personal knowledge bases through usage.**
 
-The system is designed to evolve from a purely probabilistic retrieval model into a semi-deterministic, user-informed knowledge system. It enables the model to learn which documents are consistently useful and prioritize them over time, reducing noise, improving relevance, and increasing transparency.
+*Combines vector retrieval, document provenance, and adaptive user curation — so your knowledge base gets smarter the more you use it.*
 
----
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Status: RFC / Spec](https://img.shields.io/badge/Status-RFC%20%2F%20Spec-yellow.svg)]()
+[![Integrations: LangChain · VS Code](https://img.shields.io/badge/Integrations-LangChain%20%C2%B7%20VS%20Code-green.svg)]()
+[![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-## Motivation
-
-Standard RAG systems suffer from several limitations:
-
-* **Noisy retrieval** due to vector similarity approximations
-* **Loss of document context** caused by chunking
-* **Stateless behavior**, where useful documents are not remembered
-* **Hallucination risk** when combining unrelated chunks
-* **Lack of user control** over what knowledge is considered important
-
-This architecture addresses these issues by introducing:
-
-* Persistent user-level knowledge memory
-* Document-level awareness
-* Retrieval feedback loops
-* Transparent context provenance
+</div>
 
 ---
 
-## Core Architecture
+## The Problem with Standard RAG
 
-The system consists of three main layers:
+Standard RAG pipelines retrieve document chunks based on vector similarity. This works well at scale, but has a fundamental limitation: **every query is stateless**. The system has no memory of what was relevant before, no sense of which documents a specific user relies on, and no way to prefer a known-good source over a probabilistically similar one.
 
-### 1. Global RAG Layer
+The result is a retrieval system that is:
 
-* Standard vector database
-* Documents are:
-
-  * Split into chunks
-  * Embedded
-  * Stored with metadata
-
-**Metadata includes:**
-
-* `document_id`
-* `document_title`
-* `section`
-* `source_path`
-* `chunk_index`
-
-This layer is shared across all users and acts as the primary discovery mechanism.
+- **Noisy** — chunks from unrelated documents can outscore the right one
+- **Opaque** — the user has no visibility into where the context came from
+- **Flat** — all documents are treated equally, regardless of proven relevance
+- **Amnesiac** — patterns of use are never learned or acted on
 
 ---
 
-### 2. User-Local Knowledge Layer
+## The rag-wiki Approach
 
-A personalized knowledge base built from documents the user has explicitly or implicitly selected.
+rag-wiki layers three things on top of standard RAG:
 
-**Key properties:**
+### 1. Origin Metadata at Split Time
+Every chunk in the vector database carries rich metadata back to its source document — `doc_id`, `doc_title`, `section`, `domain_tags`, timestamps. This metadata is the foundation of the entire system. It turns isolated chunks back into traceable artifacts.
 
-* Stores documents (or partial documents) promoted from RAG results
-* Acts as a high-priority retrieval source
-* Evolves based on user interaction
+### 2. A Personal Document Cache
+When a document surfaces repeatedly for a user, the system promotes it: the full origin document is fetched and stored in the user's personal cache. Future queries check this cache **first** — deterministically, by semantic match — and only fall back to the global vector search on a miss. A user's known-relevant documents are never at risk of being outscored by noise.
 
----
-
-### 3. Transparency / Wiki Layer
-
-A user-facing layer that:
-
-* Displays which documents were used in responses
-* Shows origin and provenance of retrieved chunks
-* Enables users to:
-
-  * Understand context sources
-  * Decide whether to persist documents
+### 3. Wiki-Style Provenance + Adaptive Feedback Loop
+Every response that uses RAG context shows the user exactly where it came from. Hit counters track retrieval frequency per user per document. When a document crosses a threshold, the user is prompted — once, non-intrusively — to save it. From there, a decay and promotion mechanism continuously re-ranks each document's priority based on actual usage. Documents that prove consistently relevant get pinned. Documents that stop being retrieved decay gracefully out of the active layer.
 
 ---
 
-## Retrieval Flow
+## Architecture Overview
 
-### Step-by-step pipeline:
-
-1. **User query received**
-
-2. **Local Knowledge Check**
-
-   * Search user-local documents first
-   * If relevant matches found → prioritize them
-
-3. **Global RAG Retrieval**
-
-   * Perform semantic search in vector database
-   * Retrieve top-k chunks
-
-4. **Merge & Rerank**
-
-   * Combine local and global results
-   * Rerank based on:
-
-     * Relevance
-     * Source priority (local > global)
-
-5. **Context Assembly**
-
-   * Construct final prompt context
-   * Maintain document boundaries where possible
-
-6. **Response Generation**
-
-7. **Transparency Output**
-
-   * Show:
-
-     * Which documents were used
-     * Whether they came from:
-
-       * Global RAG
-       * User-local storage
-
----
-
-## Document Promotion Mechanism
-
-A key innovation in this system is **promotion from retrieval to persistent knowledge**.
-
-### Trigger Conditions
-
-Instead of prompting users every time, promotion is based on repeated retrieval patterns.
-
-A document becomes eligible for promotion when:
-
-* Multiple chunks from the same document are retrieved frequently
-* The document consistently ranks high in relevance
-
-### Example Threshold Logic
-
-```python
-promotion_score =
-    frequency_weight * retrieval_count
-  + relevance_weight * avg_similarity
-  + recency_weight * recent_usage
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        INCOMING QUERY                       │
+└───────────────────────────────┬─────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────┐
+│              TIER 2 — USER LOCAL DOCUMENT CACHE             │
+│                                                             │
+│   Semantic match against user's claimed / pinned files      │
+│   ✓ HIT  → inject full document, skip global search         │
+│   ✗ MISS → fall through to Tier 1                           │
+└───────────────────────────────┬─────────────────────────────┘
+                                │ (miss only)
+                                ▼
+┌─────────────────────────────────────────────────────────────┐
+│              TIER 1 — GLOBAL RAG LAYER                      │
+│                                                             │
+│   Vector similarity search → chunk + origin metadata        │
+│   Increment hit_count[doc_id] for this user                 │
+│   Check if hit_count >= SURFACE_THRESHOLD                   │
+└───────────────────────────────┬─────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────┐
+│           TIER 3 — TRANSPARENCY + CURATION LAYER            │
+│                                                             │
+│   Surface: source doc name, section, hit count              │
+│   On threshold: "This file came up 3× — save to library?"   │
+│   On save: fetch full doc → store in Tier 2 cache           │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-When `promotion_score` exceeds a threshold:
+---
 
-* The user is prompted:
+## Document State Machine
 
-  > "This document has been frequently used. Would you like to save it?"
+Each document progresses through states based on retrieval frequency and user action:
+
+```
+  [Global-Only]
+       │
+       │ first retrieval
+       ▼
+  [Surfaced] ◄─────────────── (user skips, counter resets)
+       │
+       │ hit_count >= SURFACE_THRESHOLD
+       ▼
+  [Candidate] ──── user skips ────► (back to Surfaced, reset)
+       │
+       │ user saves
+       ▼
+  [Claimed]
+       │                    │
+       │ consistent usage   │ inactivity > DECAY_WINDOW
+       ▼                    ▼
+ [Domain-Pinned]        [Archived]
+       │                    │
+       │ inactivity         │ re-queried
+       ▼                    ▼
+   [Claimed]            [Surfaced]
+```
+
+| State | What it means | Retrieval behavior |
+|---|---|---|
+| **Global-Only** | Never retrieved by this user | Standard vector search |
+| **Surfaced** | Retrieved ≥ 1×, below threshold | Standard vector search + counter |
+| **Candidate** | Threshold reached, prompt shown | Standard vector search |
+| **Claimed** | User saved to personal cache | Local cache checked first |
+| **Domain-Pinned** | Consistently relevant, auto-injected | Always injected for matching domain |
+| **Archived** | Was claimed, fell out of use | Removed from priority path; restarts on re-query |
 
 ---
 
-## Promotion Outcomes
+## Threshold & Promotion Logic
 
-If user accepts:
+The save prompt fires **once per threshold crossing** — not on every query. This keeps the UX clean.
 
-* Document is added to **User-Local Knowledge Layer**
-* Retrieval priority increases
-* Future queries check this document first
+```
+Default: SURFACE_THRESHOLD = 3
+```
 
-If user declines:
+- Multiple chunks from the same document in a single query count as **one** increment (no inflation from dense documents)
+- If the user skips, the counter resets. The document will surface again after another full threshold cycle.
+- The prompt is non-blocking — it appears after the response, never before
 
-* No action taken
-* System continues tracking usage
+**Example prompt:**
 
----
+```
+📂 "API Rate Limiting — Reference Guide" has come up 3 times.
+   Save it to your personal library for faster access?
 
-## Storage Strategy
-
-Three possible approaches:
-
-### 1. Full Document Storage
-
-* Entire document saved locally
-* Pros: complete context
-* Cons: higher storage cost
-
-### 2. Partial Storage (Chunk + Neighbors)
-
-* Only relevant sections stored
-* Pros: efficient
-* Cons: may miss broader context
-
-### 3. Lazy Reference Model
-
-* Store pointer to original document
-* Fetch full content only when needed
+   [Save to Library]   [Not now]
+```
 
 ---
 
 ## Decay & Feedback Loop
 
-To prevent overfitting:
+Claimed documents that stop being retrieved begin to decay, preventing the personal cache from becoming stale.
 
-* Documents are not permanently prioritized
-* Relevance is continuously evaluated
+```
+decay_score = (days_since_last_retrieved / DECAY_WINDOW) × base_weight
+```
 
-### Decay Factors:
+When `decay_score` exceeds `ARCHIVE_THRESHOLD`, the document moves to **Archived** — not deleted, just removed from the priority retrieval path.
 
-* Lack of recent usage
-* Lower relevance scores over time
+For documents that prove consistently relevant across many sessions, **Domain Pinning** promotes them to automatic context injection:
 
-### Result:
+- Claimed for at least `MIN_CLAIMED_DAYS` (default: 7)
+- Retrieved across at least `DOMAIN_PIN_SESSIONS` distinct sessions (default: 5)
+- Average relevance score above `DOMAIN_PIN_SCORE_FLOOR` (default: 0.75)
 
-* Frequently used documents → stay prioritized
-* Irrelevant ones → gradually demoted
-
----
-
-## Retrieval Prioritization Strategy
-
-The system uses a tiered retrieval approach:
-
-1. **User-Local Knowledge**
-2. **Global RAG**
-3. **Merged + Reranked Results**
-
-Local knowledge is prioritized but **never exclusively trusted** to avoid bias and staleness.
+The combined effect: a living personal knowledge base that self-organizes around actual usage patterns rather than one-time decisions.
 
 ---
 
-## Benefits
+## Planned Integrations
 
-### 1. Reduced Hallucination
+### 🔗 LangChain Plugin
+A custom `HybridCacheRetriever` that wraps any standard LangChain retriever and adds the caching, hit counting, and promotion logic as a composable layer. Drop it into any existing LangChain chain without changing the rest of your pipeline.
 
-* Stronger document grounding
-* Less cross-document mixing
+```python
+# Planned interface (spec — not yet implemented)
+from rag_wiki.langchain import HybridCacheRetriever
 
-### 2. Improved Retrieval Accuracy
+retriever = HybridCacheRetriever(
+    base_retriever=your_existing_vectorstore_retriever,
+    user_id="user_123",
+    cache_store=LocalDocumentCache("./user_cache"),
+    surface_threshold=3,
+)
 
-* Learns from user behavior
-* Reduces reliance on similarity alone
+# Use it like any other LangChain retriever
+docs = retriever.get_relevant_documents("your query")
+```
 
-### 3. Personalized Knowledge Base
+### 🖥️ VS Code Extension
+An IDE-level integration that surfaces the provenance layer inline while you work. When the AI assistant retrieves context from your knowledge base, the extension shows a source badge in the editor. Repeated retrievals trigger the save prompt directly in the IDE sidebar — no context switching.
 
-* Adapts to individual users
-* Builds long-term context
-
-### 4. Transparency & Trust
-
-* Clear source attribution
-* Inspectable reasoning context
-
-### 5. Efficiency Gains
-
-* Fewer repeated vector searches
-* Faster responses for known topics
-
----
-
-## Challenges & Considerations
-
-### Threshold Tuning
-
-* Too low → user fatigue
-* Too high → missed opportunities
-
-### Storage Management
-
-* Handling large documents
-* Version control for updated sources
-
-### Query Routing Complexity
-
-* Balancing local vs global retrieval
-* Avoiding bias toward old data
-
-### Cold Start Problem
-
-* System behaves like standard RAG initially
-* Improves over time with usage
+**Planned UX:**
+- Source badge on AI suggestions: `📄 contracts/sla-template.md · retrieved 2×`
+- Sidebar panel: personal document library with state indicators
+- Command palette: `RAG Wiki: View my knowledge base`, `RAG Wiki: Pin document`
 
 ---
 
-## Future Improvements
+## Configuration Reference
 
-* Automatic topic/domain clustering
-* Smarter promotion scoring models
-* Cross-user shared learning (optional)
-* UI enhancements for document exploration
-* Version-aware document tracking
-
----
-
-## Use Cases
-
-* Developer documentation assistants
-* Research tools
-* Enterprise knowledge systems
-* Legal and academic workflows
-* Personal knowledge management systems
+| Parameter | Default | Description |
+|---|---|---|
+| `SURFACE_THRESHOLD` | `3` | Retrievals before save prompt |
+| `DECAY_WINDOW` | `30 days` | Inactivity window before decay |
+| `ARCHIVE_THRESHOLD` | `0.8` | Decay score that triggers archive |
+| `DOMAIN_PIN_SESSIONS` | `5` | Sessions needed for domain pinning |
+| `MIN_CLAIMED_DAYS` | `7` | Min days claimed before pin eligible |
+| `DOMAIN_PIN_SCORE_FLOOR` | `0.75` | Min avg relevance for pinning |
+| `COUNTER_RESET_ON_SKIP` | `true` | Reset counter when user skips prompt |
+| `MULTI_CHUNK_COUNT_ONCE` | `true` | Multiple chunks from same doc = 1 hit |
 
 ---
 
-## Summary
+## Why This Isn't Just Standard RAG with a Cache
 
-This architecture extends traditional RAG by introducing a user-driven memory layer that transforms retrieval from a stateless process into a continuously learning system.
+A few things that make this architecture distinct from simply caching retrieval results:
 
-Instead of repeatedly searching for relevant information, the system learns what matters to the user and adapts accordingly—balancing global knowledge discovery with personalized, persistent context.
+- **The cache stores full documents, not chunks.** Once a document is claimed, future queries get the full coherent source — not fragments. This dramatically reduces chunk-blending hallucinations.
+- **The promotion trigger is behavioral, not manual.** Users don't manage a knowledge base explicitly. The system learns from query patterns and only asks for confirmation when it has strong evidence of relevance.
+- **The decay loop is continuous.** The personal cache is not a static store. Documents that lose relevance are automatically deprioritized without the user having to curate anything.
+- **Provenance is first-class.** Every retrieval is traceable. The user always knows which document answered their question and how often it has been relied on.
 
 ---
 
-## License
+## Repository Structure
 
-MIT License (or specify your preferred license)
+```
+rag-wiki/
+├── README.md
+├── CONTRIBUTING.md
+├── docs/
+│   ├── architecture.md        ← Full system spec
+│   ├── retrieval-flow.md      ← End-to-end query lifecycle
+│   ├── document-states.md     ← State machine detail
+│   ├── decay-feedback.md      ← Decay formula + pinning logic
+│   └── configuration.md      ← All config parameters
+├── integrations/
+│   ├── langchain/
+│   │   └── README.md          ← LangChain plugin interface spec
+│   └── vscode/
+│       └── README.md          ← VS Code extension UX spec
+└── rfcs/
+    └── 0001-initial-design.md ← Formal RFC
+```
+
+---
+
+## Status
+
+This repository is currently a **design spec and RFC**. No implementation code exists yet.
+
+The goal is to:
+1. Finalize the architecture spec through community feedback
+2. Build the LangChain plugin (`HybridCacheRetriever`) as the first implementation
+3. Build the VS Code extension as the second integration target
+4. Publish as composable, framework-agnostic packages
 
 ---
 
 ## Contributing
 
-Contributions are welcome. Please open issues or submit pull requests for improvements, ideas, or bug fixes.
+This project is in the spec phase — the best contributions right now are **feedback, questions, and challenges to the design**.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for details. Some areas actively looking for input:
+
+- Edge cases in the decay / promotion logic
+- Alternative threshold strategies (time-based vs count-based)
+- Multi-user / team caching scenarios
+- Storage backend options for the local document cache
+- LangChain retriever interface design
+
+Open an issue or start a discussion. All are welcome.
 
 ---
+
+## Author
+
+**[sstprk](https://github.com/sstprk)**
+
+---
+
+<div align="center">
+
+*If this architecture solves a problem you've hit with RAG — open an issue, leave a star, or reach out.*
+
+</div>
