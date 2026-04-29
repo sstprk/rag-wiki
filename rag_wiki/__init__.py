@@ -18,6 +18,7 @@ from rag_wiki.transparency.provenance import (
 )
 
 __all__ = [
+    "HybridRetriever",
     # Core retriever
     "RagWikiRetriever",
     "RagWikiRetrieverConfig",
