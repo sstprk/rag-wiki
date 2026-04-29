@@ -118,6 +118,16 @@ class TestListMethods:
         ids = {r.doc_id for r in decay_list}
         assert ids == {"doc-1", "doc-2"}
 
+    def test_list_surfaced_returns_surfaced_and_suggested(
+        self, store: RedisStateStore
+    ) -> None:
+        store.upsert(make_record(doc_id="doc-1", user_state=DocumentState.SURFACED))
+        store.upsert(make_record(doc_id="doc-2", user_state=DocumentState.SUGGESTED))
+        store.upsert(make_record(doc_id="doc-3", user_state=DocumentState.CLAIMED))
+        surfaced = store.list_surfaced("user-1")
+        ids = {r.doc_id for r in surfaced}
+        assert ids == {"doc-1", "doc-2"}
+
     def test_lists_are_user_scoped(self, store: RedisStateStore) -> None:
         store.upsert(make_record(user_id="user-1", doc_id="doc-1", user_state=DocumentState.CLAIMED))
         store.upsert(make_record(user_id="user-2", doc_id="doc-1", user_state=DocumentState.CLAIMED))

@@ -67,6 +67,16 @@ class MemoryStateStore(StateStore):
                 if r.user_id == user_id and r.user_state == DocumentState.PINNED
             ]
 
+    def list_surfaced(self, user_id: str) -> list[UserDocRecord]:
+        """All SURFACED and SUGGESTED docs — used for miss tracking."""
+        with self._lock:
+            return [
+                copy.deepcopy(r)
+                for r in self._data.values()
+                if r.user_id == user_id
+                and r.user_state in (DocumentState.SURFACED, DocumentState.SUGGESTED)
+            ]
+
     def list_for_decay(self, user_id: str) -> list[UserDocRecord]:
         """CLAIMED + PINNED records eligible for decay scoring."""
         with self._lock:

@@ -86,6 +86,8 @@ class RedisStateStore(StateStore):
             "pinned_at":            _dt_to_str(record.pinned_at) or "",
             "demoted_at":           _dt_to_str(record.demoted_at) or "",
             "no_resiluggest_until": _dt_to_str(record.no_resiluggest_until) or "",
+            "next_suggest_at":      str(record.next_suggest_at),
+            "queries_missed":       str(record.queries_missed),
         }
 
     def _hash_to_record(self, data: dict[bytes | str, bytes | str]) -> UserDocRecord:
@@ -112,6 +114,8 @@ class RedisStateStore(StateStore):
             pinned_at            = _str_to_dt(_v("pinned_at")),
             demoted_at           = _str_to_dt(_v("demoted_at")),
             no_resiluggest_until = _str_to_dt(_v("no_resiluggest_until")),
+            next_suggest_at      = int(_v("next_suggest_at") or "0"),
+            queries_missed       = int(_v("queries_missed") or "0"),
         )
 
     # ─── Index management ─────────────────────────────────────────────────────
@@ -193,6 +197,13 @@ class RedisStateStore(StateStore):
         """CLAIMED + PINNED records eligible for decay scoring."""
         return self._list_by_state(user_id, DocumentState.CLAIMED) + \
                self._list_by_state(user_id, DocumentState.PINNED)
+
+    def list_surfaced(self, user_id: str) -> list[UserDocRecord]:
+        """All SURFACED and SUGGESTED docs — used for miss tracking."""
+        return (
+            self._list_by_state(user_id, DocumentState.SURFACED) +
+            self._list_by_state(user_id, DocumentState.SUGGESTED)
+        )
 
     def delete(self, user_id: str, doc_id: str) -> None:
         """Remove a record entirely."""

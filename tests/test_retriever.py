@@ -126,7 +126,8 @@ class TestSuggestionFlow:
         retriever.decline_suggestion("doc-1")
         record = store.get("user-test", "doc-1")
         assert record.user_state == DocumentState.SURFACED
-        assert record.no_resiluggest_until is not None
+        # After decline, next suggestion is scheduled at an escalated fetch count
+        assert record.next_suggest_at > record.fetch_count
 
 
 class TestCacheRetrieval:
