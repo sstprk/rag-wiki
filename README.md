@@ -8,7 +8,7 @@ Surfaces documents, learns from usage, and lets users build personal knowledge b
 [![PyPI version](https://img.shields.io/pypi/v/langchain-rag-wiki.svg)](https://pypi.org/project/langchain-rag-wiki/) 
 [![Python](https://img.shields.io/pypi/pyversions/langchain-rag-wiki.svg)](https://pypi.org/project/langchain-rag-wiki/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Contributing](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTE.md)
+[![Contributing](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 [Installation](#installation) · [Quickstart](#quickstart) · [How It Works](#how-it-works) · [Real Vector DB Setup](#connecting-to-a-real-vector-db) · [Configuration](#configuration) · [Contributing](CONTRIBUTING.md)
 
