@@ -33,6 +33,7 @@ class UserDocRecord:
     no_resiluggest_until: Optional[datetime] = None  # after user declines
     next_suggest_at:     int           = 0    # fetch_count target for next suggestion (0 = use threshold)
     queries_missed:      int           = 0    # consecutive queries where doc was not retrieved
+    cache_miss_streak:   int           = 0    # consecutive queries where no chunk scored >= threshold
 
 
 class StateStore(ABC):

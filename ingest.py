@@ -11,15 +11,21 @@ docs = loader.load()
 splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
 chunks = splitter.split_documents(docs)
 
+from collections import defaultdict
+counts = defaultdict(int)
+
 # Inject doc_id metadata on each chunk
 for chunk in chunks:
-    chunk.metadata["doc_id"] = chunk.metadata.get("source", "unknown")
-    chunk.metadata["doc_title"] = chunk.metadata["doc_id"].split("/")[-1]
+    doc_id = chunk.metadata.get("source", "unknown")
+    chunk.metadata["doc_id"] = doc_id
+    chunk.metadata["doc_title"] = doc_id.split("/")[-1]
+    chunk.metadata["chunk_index"] = counts[doc_id]
+    counts[doc_id] += 1
 
 # Embed and store
 vectorstore = Chroma.from_documents(
     documents=chunks,
-    embedding=OllamaEmbeddings(model="nomic-embed-text:latest"),
+    embedding=OllamaEmbeddings(model="mxbai-embed-large:latest"),
     persist_directory="./chroma_db",
     collection_name="my_docs",
 )
