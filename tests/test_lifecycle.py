@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from rag_wiki.storage.base import DocumentState, UserDocRecord
 from rag_wiki.storage.sqlite import SQLiteStateStore
+from rag_wiki.storage.chunk_store import ChunkStore
 from rag_wiki.lifecycle.state_machine import StateMachine, InvalidTransitionError
 from rag_wiki.lifecycle.fetch_counter import FetchCounter
 from rag_wiki.lifecycle.decay_engine import DecayEngine, DecayConfig
@@ -28,8 +29,13 @@ def counter(store, sm):
 
 @pytest.fixture
 def decay(store, sm):
-    cfg = DecayConfig(pin_hold_days=0, demotion_hold_days=0)  # no hysteresis in tests
-    return DecayEngine(store, sm, config=cfg)
+    cfg = DecayConfig(pin_hold_days=0, demotion_hold_days=0, w_chunk_hit=0.15)
+    chunk_store = ChunkStore(wiki_save_dir=None)
+    return DecayEngine(store, sm, config=cfg, chunk_store=chunk_store)
+
+@pytest.fixture
+def chunk_store():
+    return ChunkStore(wiki_save_dir=None)
 
 
 # ─── StateMachine ─────────────────────────────────────────────────────────────
@@ -165,7 +171,9 @@ class TestDecayEngine:
     def test_fresh_doc_has_high_score(self, decay, store):
         self._claimed_record(store, fetch_count=15, days_ago=0)
         results = decay.run_for_user("u1")
-        assert results[0].new_score > 0.7
+        # With w_chunk_hit=0.15 and no chunks stored, score is lower than old baseline.
+        # recency≈1.0, frequency=0.75, explicit=0, chunk_hit=0 → ~0.59
+        assert results[0].new_score > 0.5
 
     def test_stale_doc_has_low_score(self, decay, store):
         self._claimed_record(store, fetch_count=1, days_ago=120)
@@ -202,3 +210,98 @@ class TestDecayEngine:
         assert record.user_state == DocumentState.DEMOTED
         assert record.decay_score == 0.0
         assert record.no_resiluggest_until is not None
+
+
+# ─── DecayEngine + ChunkStore integration ─────────────────────────────────────
+
+class TestDecayEngineChunkStore:
+    def _claimed_record(self, store, fetch_count=10, days_ago=1):
+        r = UserDocRecord(
+            user_id="u1", doc_id="d1",
+            doc_title="Doc", doc_path="/kb/doc.pdf",
+            user_state=DocumentState.CLAIMED,
+            fetch_count=fetch_count,
+            last_fetched_at=datetime.now(timezone.utc) - timedelta(days=days_ago),
+            full_content="some content",
+        )
+        store.upsert(r)
+        return r
+
+    def test_chunk_hit_rate_improves_score(self, store, sm, chunk_store):
+        """100% hit rate record scores higher than 0% hit rate record."""
+        cfg = DecayConfig(pin_hold_days=0, demotion_hold_days=0, w_chunk_hit=0.15)
+        engine = DecayEngine(store, sm, config=cfg, chunk_store=chunk_store)
+
+        # Record with 0% hit rate
+        r_no_hits = UserDocRecord(
+            user_id="u1", doc_id="d1",
+            doc_title="Doc", doc_path="/p",
+            user_state=DocumentState.CLAIMED,
+            fetch_count=10,
+            last_fetched_at=datetime.now(timezone.utc) - timedelta(days=1),
+            full_content="content",
+        )
+        store.upsert(r_no_hits)
+        chunk_store.add_chunks("u1", "d1", [
+            {"chunk_index": 0, "text": "t", "vector": [1.0], "section": "",
+             "hit_count": 0, "last_hit_at": None},
+        ])
+
+        # Record with 100% hit rate
+        r_all_hits = UserDocRecord(
+            user_id="u1", doc_id="d2",
+            doc_title="Doc2", doc_path="/p2",
+            user_state=DocumentState.CLAIMED,
+            fetch_count=10,
+            last_fetched_at=datetime.now(timezone.utc) - timedelta(days=1),
+            full_content="content",
+        )
+        store.upsert(r_all_hits)
+        chunk_store.add_chunks("u1", "d2", [
+            {"chunk_index": 0, "text": "t", "vector": [1.0], "section": "",
+             "hit_count": 5, "last_hit_at": datetime.now(timezone.utc).isoformat()},
+        ])
+
+        score_no_hits  = engine._compute_score(r_no_hits,  user_id="u1")
+        score_all_hits = engine._compute_score(r_all_hits, user_id="u1")
+        assert score_all_hits > score_no_hits
+
+    def test_force_remove_deletes_chunks(self, store, sm, chunk_store):
+        """force_remove clears the chunk store for that doc."""
+        cfg = DecayConfig(pin_hold_days=0, demotion_hold_days=0)
+        engine = DecayEngine(store, sm, config=cfg, chunk_store=chunk_store)
+
+        self._claimed_record(store)
+        chunk_store.add_chunks("u1", "d1", [
+            {"chunk_index": 0, "text": "t", "vector": [1.0], "section": "",
+             "hit_count": 0, "last_hit_at": None},
+        ])
+        assert len(chunk_store.load_chunks("u1", "d1")) == 1
+
+        engine.force_remove("u1", "d1")
+        assert chunk_store.load_chunks("u1", "d1") == []
+
+    def test_demotion_transition_deletes_chunks(self, store, sm, chunk_store):
+        """Decay-triggered demotion clears the chunk store."""
+        cfg = DecayConfig(pin_hold_days=0, demotion_hold_days=0, w_chunk_hit=0.15)
+        engine = DecayEngine(store, sm, config=cfg, chunk_store=chunk_store)
+
+        # Very stale record that will score below demotion_threshold
+        r = UserDocRecord(
+            user_id="u1", doc_id="d1",
+            doc_title="Doc", doc_path="/p",
+            user_state=DocumentState.CLAIMED,
+            fetch_count=0,
+            last_fetched_at=datetime.now(timezone.utc) - timedelta(days=200),
+            full_content="content",
+            demoted_at=datetime.now(timezone.utc) - timedelta(days=10),
+        )
+        store.upsert(r)
+        chunk_store.add_chunks("u1", "d1", [
+            {"chunk_index": 0, "text": "t", "vector": [1.0], "section": "",
+             "hit_count": 0, "last_hit_at": None},
+        ])
+        assert len(chunk_store.load_chunks("u1", "d1")) == 1
+
+        engine.run_for_user("u1")
+        assert chunk_store.load_chunks("u1", "d1") == []

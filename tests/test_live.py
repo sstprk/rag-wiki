@@ -31,7 +31,7 @@ retriever = RagWikiRetriever(
 )
 
 queries = [
-    "What are the university names?",
+    "?",
     "What are the university locations?",
     "What are the university scholarships?",
 ]

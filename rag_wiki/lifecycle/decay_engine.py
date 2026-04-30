@@ -3,11 +3,12 @@ DecayEngine — computes relevance decay scores and applies PINNED/DEMOTED
 transitions. Designed to run as a background scheduled job (daily).
 
 Score formula:
-  decay_score = weighted_avg(recency_factor, frequency_factor, explicit_signal)
+  decay_score = weighted_avg(recency, frequency, explicit_signal, chunk_hit_rate)
 
-  recency_factor  = exp(-λ * days_since_last_fetch)
+  recency_factor   = exp(-λ * days_since_last_fetch)
   frequency_factor = min(fetch_count / FREQ_CAP, 1.0)
   explicit_signal  = value set by direct user actions (thumbs up/down etc.)
+  chunk_hit_rate   = fraction of cached chunks ever matched by a query
 """
 
 import math
@@ -30,10 +31,11 @@ def _ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
 
 @dataclass
 class DecayConfig:
-    # Score weights (must sum to 1.0 conceptually — engine normalises)
-    w_recency:   float = 0.5
-    w_frequency: float = 0.3
-    w_explicit:  float = 0.2
+    # Score weights (engine normalises by total_weight so exact sum is flexible)
+    w_recency:    float = 0.40
+    w_frequency:  float = 0.30
+    w_explicit:   float = 0.20
+    w_chunk_hit:  float = 0.15
 
     # Exponential decay steepness (λ).  Half-life = ln(2)/λ ≈ 14 days at 0.05
     decay_lambda: float = 0.05
@@ -53,6 +55,9 @@ class DecayConfig:
     explicit_signal_min: float = 0.0
     explicit_signal_max: float = 1.0
 
+    # Immediate demotion after this many consecutive cache misses
+    max_cache_miss_streak: int = 10
+
 
 @dataclass
 class DecayResult:
@@ -68,13 +73,15 @@ class DecayEngine:
 
     def __init__(
         self,
-        store:        StateStore,
+        store:         StateStore,
         state_machine: StateMachine,
-        config:       Optional[DecayConfig] = None,
+        config:        Optional[DecayConfig] = None,
+        chunk_store:   Optional[object] = None,
     ):
-        self._store = store
-        self._sm    = state_machine
-        self._cfg   = config or DecayConfig()
+        self._store       = store
+        self._sm          = state_machine
+        self._cfg         = config or DecayConfig()
+        self._chunk_store = chunk_store
 
     # ─── Explicit signal API (called from user interaction events) ─────────────
 
@@ -87,7 +94,7 @@ class DecayEngine:
             record.explicit_signal + 0.3,
             self._cfg.explicit_signal_max,
         )
-        record.decay_score = self._compute_score(record)
+        record.decay_score = self._compute_score(record, user_id=user_id)
         self._store.upsert(record)
 
     def thumbs_down(self, user_id: str, doc_id: str) -> None:
@@ -99,7 +106,7 @@ class DecayEngine:
             record.explicit_signal - 0.3,
             self._cfg.explicit_signal_min,
         )
-        record.decay_score = self._compute_score(record)
+        record.decay_score = self._compute_score(record, user_id=user_id)
         self._store.upsert(record)
 
     def force_pin(self, user_id: str, doc_id: str) -> None:
@@ -123,6 +130,8 @@ class DecayEngine:
         record.decay_score          = 0.0
         record.no_resiluggest_until = now + timedelta(days=30)
         self._store.upsert(record)
+        if self._chunk_store is not None:
+            self._chunk_store.delete(user_id, doc_id)
 
     # ─── Scheduled job entry point ─────────────────────────────────────────────
 
@@ -145,16 +154,16 @@ class DecayEngine:
             old_state = record.user_state
             old_score = record.decay_score
 
-            record.decay_score = self._compute_score(record, now)
+            record.decay_score = self._compute_score(record, now, user_id=user_id)
             record = self._maybe_transition(record, now)
 
             self._store.upsert(record)
             results.append(DecayResult(
-                doc_id      = record.doc_id,
-                old_state   = old_state,
-                new_state   = record.user_state,
-                old_score   = old_score,
-                new_score   = record.decay_score,
+                doc_id       = record.doc_id,
+                old_state    = old_state,
+                new_state    = record.user_state,
+                old_score    = old_score,
+                new_score    = record.decay_score,
                 transitioned = old_state != record.user_state,
             ))
 
@@ -164,8 +173,9 @@ class DecayEngine:
 
     def _compute_score(
         self,
-        record: UserDocRecord,
-        now: Optional[datetime] = None,
+        record:  UserDocRecord,
+        now:     Optional[datetime] = None,
+        user_id: Optional[str]      = None,
     ) -> float:
         now = _ensure_utc(now) or datetime.now(timezone.utc)
         cfg = self._cfg
@@ -187,12 +197,19 @@ class DecayEngine:
             min(record.explicit_signal, cfg.explicit_signal_max),
         )
 
-        # Weighted average
-        total_weight = cfg.w_recency + cfg.w_frequency + cfg.w_explicit
+        # Chunk hit rate — fraction of cached chunks ever matched by a query
+        if self._chunk_store is not None and user_id is not None:
+            chunk_hit_rate = self._chunk_store.get_hit_rate(user_id, record.doc_id)
+        else:
+            chunk_hit_rate = 0.0
+
+        # Weighted average (engine normalises so weights don't need to sum to 1)
+        total_weight = cfg.w_recency + cfg.w_frequency + cfg.w_explicit + cfg.w_chunk_hit
         score = (
-            cfg.w_recency   * recency  +
-            cfg.w_frequency * frequency +
-            cfg.w_explicit  * explicit
+            cfg.w_recency    * recency         +
+            cfg.w_frequency  * frequency       +
+            cfg.w_explicit   * explicit        +
+            cfg.w_chunk_hit  * chunk_hit_rate
         ) / total_weight
 
         return round(max(0.0, min(1.0, score)), 4)
@@ -215,6 +232,8 @@ class DecayEngine:
                     days_held = (now - _ensure_utc(record.pinned_at)).days
                     if days_held >= cfg.pin_hold_days:
                         record = self._sm.transition(record, DocumentState.PINNED, now=now)
+                        if self._chunk_store is not None:
+                            self._chunk_store.delete(record.user_id, record.doc_id)
             elif score < cfg.demotion_threshold:
                 if record.demoted_at is None:
                     record.demoted_at = now
@@ -222,6 +241,8 @@ class DecayEngine:
                     days_held = (now - _ensure_utc(record.demoted_at)).days
                     if days_held >= cfg.demotion_hold_days:
                         record = self._sm.transition(record, DocumentState.DEMOTED, now=now)
+                        if self._chunk_store is not None:
+                            self._chunk_store.delete(record.user_id, record.doc_id)
             else:
                 record.pinned_at  = None
                 record.demoted_at = None
@@ -237,5 +258,7 @@ class DecayEngine:
                     days_held = (now - _ensure_utc(record.demoted_at)).days
                     if days_held >= cfg.demotion_hold_days:
                         record = self._sm.transition(record, DocumentState.DEMOTED, now=now)
+                        if self._chunk_store is not None:
+                            self._chunk_store.delete(record.user_id, record.doc_id)
 
         return record

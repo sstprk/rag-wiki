@@ -2,9 +2,8 @@
 RagWikiRetriever — the main entry point.
 
 Orchestrates the three-tier retrieval flow:
-  1. PINNED docs  → always injected into context
-  2. CLAIMED docs → direct local cache hit (skips vector search)
-  3. Global RAG   → fallback vector similarity search
+  1. PINNED + CLAIMED docs → semantic chunk search (or keyword fallback)
+  2. Global RAG            → fallback vector similarity search
 
 Wraps any LangChain BaseRetriever as the global RAG backend.
 """
@@ -17,12 +16,15 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
+import numpy as np
+
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.callbacks import CallbackManagerForRetrieverRun
 
 from rag_wiki.storage.base import DocumentState, StateStore, UserDocRecord
 from rag_wiki.storage.memory import MemoryStateStore
+from rag_wiki.storage.chunk_store import ChunkStore
 from rag_wiki.lifecycle.state_machine import StateMachine
 from rag_wiki.lifecycle.fetch_counter import FetchCounter, SuggestionEvent
 from rag_wiki.lifecycle.decay_engine import DecayEngine, DecayConfig
@@ -31,13 +33,47 @@ from rag_wiki.transparency.provenance import ProvenanceBlock, ProvenanceBuilder
 logger = logging.getLogger(__name__)
 
 
+def _resolve_embedding_model(
+    explicit_model: Optional[Any],
+    global_retriever: Any,
+) -> Optional[Any]:
+    """
+    Resolve the embedding model to use for semantic cache search.
+
+    Priority:
+      1. Use explicit_model if provided.
+      2. Try to extract from global_retriever via common attribute names.
+      3. Try to extract from global_retriever.vectorstore (LangChain VectorStoreRetriever).
+      4. Return None — keyword fallback will be used.
+    """
+    if explicit_model is not None:
+        return explicit_model
+
+    for attr in ("embeddings", "embedding_function", "embedding", "_embeddings"):
+        model = getattr(global_retriever, attr, None)
+        if model is not None and callable(getattr(model, "embed_query", None)):
+            return model
+
+    # LangChain VectorStoreRetriever exposes the vectorstore via .vectorstore
+    vectorstore = getattr(global_retriever, "vectorstore", None)
+    if vectorstore is not None:
+        for attr in ("embeddings", "embedding_function", "embedding", "_embeddings"):
+            model = getattr(vectorstore, attr, None)
+            if model is not None and callable(getattr(model, "embed_query", None)):
+                return model
+
+    return None
+
+
 @dataclass
 class RagWikiRetrieverConfig:
-    fetch_threshold:     int         = 3
-    reset_threshold:     int         = 3     # queries without a hit before fetch_count resets
-    no_resiluggest_days: int         = 30    # kept for API compat
-    wiki_save_dir:       Optional[str] = None  # directory to save accepted docs; None = disabled
-    decay:               DecayConfig  = None
+    fetch_threshold:      int          = 3
+    reset_threshold:      int          = 3       # queries without a hit before fetch_count resets
+    no_resiluggest_days:  int          = 30      # kept for API compat
+    wiki_save_dir:        Optional[str] = None   # directory to save accepted docs; None = disabled
+    similarity_threshold: float        = 0.75   # cosine similarity cutoff for cache hits
+    local_top_k:          int          = 3       # max chunks to inject per cached doc
+    decay:                DecayConfig  = None
 
     def __post_init__(self):
         if self.decay is None:
@@ -67,10 +103,12 @@ class RagWikiRetriever(BaseRetriever):
     on_suggestion:    Optional[Any] = None
 
     # Internal components — set via object.__setattr__ after Pydantic init
-    _sm:      Any = None
-    _counter: Any = None
-    _decay:   Any = None
-    _builder: Any = None
+    _sm:             Any = None
+    _counter:        Any = None
+    _decay:          Any = None
+    _builder:        Any = None
+    _embedding_model: Any = None
+    _chunk_store:    Any = None
 
     # Cache: doc_id → page_content from last global retrieval
     _content_cache: Any = None
@@ -84,6 +122,7 @@ class RagWikiRetriever(BaseRetriever):
         state_store:      Optional[StateStore] = None,
         config:           Optional[RagWikiRetrieverConfig] = None,
         on_suggestion:    Optional[Callable[[SuggestionEvent], None]] = None,
+        embedding_model:  Optional[Any] = None,
         **kwargs,
     ):
         cfg   = config or RagWikiRetrieverConfig()
@@ -99,7 +138,12 @@ class RagWikiRetriever(BaseRetriever):
         )
 
         sm = StateMachine()
+        chunk_store = ChunkStore(wiki_save_dir=cfg.wiki_save_dir)
+        resolved_model = _resolve_embedding_model(embedding_model, global_retriever)
+
         object.__setattr__(self, "_sm", sm)
+        object.__setattr__(self, "_embedding_model", resolved_model)
+        object.__setattr__(self, "_chunk_store", chunk_store)
         object.__setattr__(self, "_counter", FetchCounter(
             store               = store,
             state_machine       = sm,
@@ -111,6 +155,7 @@ class RagWikiRetriever(BaseRetriever):
             store         = store,
             state_machine = sm,
             config        = cfg.decay,
+            chunk_store   = chunk_store,
         ))
         object.__setattr__(self, "_builder", ProvenanceBuilder())
         object.__setattr__(self, "_content_cache", {})
@@ -123,56 +168,120 @@ class RagWikiRetriever(BaseRetriever):
         *,
         run_manager: CallbackManagerForRetrieverRun,
     ) -> list[Document]:
-        retrieved_meta: list[dict]            = []
+        retrieved_meta: list[dict]               = []
         user_records:   dict[str, UserDocRecord] = {}
         suggestion:     Optional[SuggestionEvent] = None
-        docs:           list[Document]        = []
+        docs:           list[Document]           = []
 
-        # ── Step 1: Inject PINNED documents ───────────────────────────────────
-        pinned = self.state_store.list_pinned(self.user_id)
-        for record in pinned:
-            if record.full_content:
-                docs.append(Document(
-                    page_content = record.full_content,
-                    metadata     = {
+        # ── Embed query once — reused for all cache lookups ───────────────────
+        query_vec   = self._embed_query(query)
+        chunk_store = object.__getattribute__(self, "_chunk_store")
+
+        # ── Step 1+2: Unified semantic search over CLAIMED + PINNED cache ─────
+        cached_records = (
+            self.state_store.list_pinned(self.user_id) +
+            self.state_store.list_claimed(self.user_id)
+        )
+        served_doc_ids = set()
+
+        for record in cached_records:
+            chunks = chunk_store.load_chunks(self.user_id, record.doc_id)
+            now    = datetime.now(timezone.utc)
+
+            if query_vec is not None and chunks:
+                # ── Semantic path ──────────────────────────────────────────────
+                matrix = ChunkStore.build_matrix(chunks)
+                if matrix is not None:
+                    scores   = ChunkStore.cosine_similarity_matrix(query_vec, matrix)
+                    hit_mask = scores >= self.config.similarity_threshold
+
+                    if hit_mask.any():
+                        # Sort hits by score desc, take top local_top_k
+                        hit_indices = sorted(
+                            [i for i, h in enumerate(hit_mask) if h],
+                            key=lambda i: scores[i],
+                            reverse=True,
+                        )[:self.config.local_top_k]
+
+                        # Record hits for decay tracking
+                        real_hit_indices = [chunks[i]["chunk_index"] for i in hit_indices]
+                        chunk_store.record_hits(
+                            self.user_id, record.doc_id, real_hit_indices, now
+                        )
+
+                        # Reset miss streak
+                        if record.cache_miss_streak != 0:
+                            record.cache_miss_streak = 0
+                            self.state_store.upsert(record)
+
+                        # Stamp last_fetched_at so decay recency signal stays alive
+                        record.last_fetched_at = now
+                        self.state_store.upsert(record)
+
+                        hit_texts = "\n\n".join(chunks[i]["text"] for i in hit_indices)
+                        docs.append(Document(
+                            page_content = hit_texts,
+                            metadata     = {
+                                "doc_id":      record.doc_id,
+                                "doc_title":   record.doc_title,
+                                "doc_path":    record.doc_path,
+                                "from_cache":  True,
+                                "user_state":  record.user_state.value,
+                                "chunks_used": hit_indices,
+                                "scores":      [float(scores[i]) for i in hit_indices],
+                            }
+                        ))
+                        served_doc_ids.add(record.doc_id)
+                        user_records[record.doc_id] = record
+                        retrieved_meta.append({
+                            "doc_id":      record.doc_id,
+                            "doc_title":   record.doc_title,
+                            "doc_path":    record.doc_path,
+                            "from_cache":  True,
+                            "chunks_used": hit_indices,
+                        })
+
+                    else:
+                        # No chunks hit — increment miss streak
+                        record.cache_miss_streak += 1
+
+                        if record.cache_miss_streak >= self.config.decay.max_cache_miss_streak:
+                            logger.info(
+                                "Auto-demoting doc_id=%r for user=%r "
+                                "(cache_miss_streak=%d)",
+                                record.doc_id, self.user_id, record.cache_miss_streak,
+                            )
+                            try:
+                                record = self._sm.transition(
+                                    record, DocumentState.DEMOTED, now=now,
+                                )
+                            except Exception:
+                                pass
+                            chunk_store.delete(self.user_id, record.doc_id)
+
+                        self.state_store.upsert(record)
+
+            else:
+                # ── Keyword fallback (no embedding model or no chunks yet) ─────
+                if record.full_content and self._is_relevant(query, record.full_content):
+                    docs.append(Document(
+                        page_content = record.full_content,
+                        metadata     = {
+                            "doc_id":     record.doc_id,
+                            "doc_title":  record.doc_title,
+                            "doc_path":   record.doc_path,
+                            "from_cache": True,
+                            "user_state": record.user_state.value,
+                        }
+                    ))
+                    served_doc_ids.add(record.doc_id)
+                    user_records[record.doc_id] = record
+                    retrieved_meta.append({
                         "doc_id":     record.doc_id,
                         "doc_title":  record.doc_title,
                         "doc_path":   record.doc_path,
                         "from_cache": True,
-                        "user_state": DocumentState.PINNED.value,
-                    }
-                ))
-                user_records[record.doc_id] = record
-                retrieved_meta.append({
-                    "doc_id":     record.doc_id,
-                    "doc_title":  record.doc_title,
-                    "doc_path":   record.doc_path,
-                    "from_cache": True,
-                })
-
-        # ── Step 2: Check CLAIMED cache ───────────────────────────────────────
-        claimed     = self.state_store.list_claimed(self.user_id)
-        claimed_ids = {r.doc_id for r in claimed}
-
-        for record in claimed:
-            if record.full_content and self._is_relevant(query, record.full_content):
-                docs.append(Document(
-                    page_content = record.full_content,
-                    metadata     = {
-                        "doc_id":     record.doc_id,
-                        "doc_title":  record.doc_title,
-                        "doc_path":   record.doc_path,
-                        "from_cache": True,
-                        "user_state": DocumentState.CLAIMED.value,
-                    }
-                ))
-                user_records[record.doc_id] = record
-                retrieved_meta.append({
-                    "doc_id":     record.doc_id,
-                    "doc_title":  record.doc_title,
-                    "doc_path":   record.doc_path,
-                    "from_cache": True,
-                })
+                    })
 
         # ── Step 3: Global RAG fallback ───────────────────────────────────────
         global_docs = self.global_retriever.invoke(
@@ -180,13 +289,12 @@ class RagWikiRetriever(BaseRetriever):
             config={"callbacks": run_manager.get_child()},
         )
 
-        # Track which doc_ids we've already incremented this query (avoid double-counting)
+        # Track which doc_ids we've already incremented this query
         incremented_this_query: set[str] = set()
 
         for gdoc in global_docs:
             meta = gdoc.metadata or {}
 
-            # ── FIX: resolve doc_id — fall back to source if doc_id missing ──
             doc_id = (
                 meta.get("doc_id")
                 or meta.get("source")
@@ -200,7 +308,7 @@ class RagWikiRetriever(BaseRetriever):
             doc_path = meta.get("doc_path") or meta.get("source") or ""
 
             # Skip if already served from personal cache
-            if doc_id in claimed_ids:
+            if doc_id in served_doc_ids:
                 continue
 
             # Normalise metadata on the doc so downstream always has doc_id
@@ -248,16 +356,13 @@ class RagWikiRetriever(BaseRetriever):
                 user_records[doc_id] = record
 
         # ── Step 6: Record misses for docs not retrieved this query ──────────
-        # Increment queries_missed for all SURFACED/SUGGESTED docs that didn't
-        # appear in this query's results. FetchCounter resets fetch_count when
-        # queries_missed reaches reset_threshold.
         retrieved_ids = {m["doc_id"] for m in retrieved_meta if not m.get("from_cache")}
         tracked_docs  = self.state_store.list_surfaced(self.user_id)
         for record in tracked_docs:
             if record.doc_id not in retrieved_ids:
                 self._counter.record_miss(self.user_id, record.doc_id)
 
-        # ── Step 7: Build provenance ───────────────────────────────────────────
+        # ── Step 7: Build provenance ──────────────────────────────────────────
         provenance = self._builder.build(
             retrieved_docs = retrieved_meta,
             user_records   = user_records,
@@ -279,6 +384,7 @@ class RagWikiRetriever(BaseRetriever):
           3. Cached chunk from last retrieval (fallback)
 
         If ``config.wiki_save_dir`` is set, a timestamped copy is written there.
+        Chunk accumulation already happened at retrieval time via _accumulate_chunks.
         """
         content = full_content
 
@@ -318,6 +424,22 @@ class RagWikiRetriever(BaseRetriever):
             except OSError as exc:
                 logger.warning("Could not save doc copy to wiki_save_dir: %s", exc)
 
+        # Embed and store all chunks since the document is now approved
+        if content:
+            try:
+                from langchain_text_splitters import RecursiveCharacterTextSplitter
+                splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+                doc_to_split = Document(page_content=content, metadata={"doc_id": doc_id})
+                split_docs = splitter.split_documents([doc_to_split])
+
+                for i, doc in enumerate(split_docs):
+                    doc.metadata["chunk_index"] = i
+                
+                self._accumulate_chunks_batch([(doc_id, doc) for doc in split_docs])
+                logger.info("Chunked, embedded and saved %d chunks for doc_id=%r", len(split_docs), doc_id)
+            except Exception as exc:
+                logger.warning("Failed to chunk and embed doc_id=%r: %s", doc_id, exc)
+
         return self._counter.accept_suggestion(self.user_id, doc_id, content)
 
     def decline_suggestion(self, doc_id: str) -> UserDocRecord:
@@ -346,10 +468,62 @@ class RagWikiRetriever(BaseRetriever):
 
     # ─── Private ──────────────────────────────────────────────────────────────
 
+    def _embed_query(self, query: str) -> Optional[np.ndarray]:
+        """Embed the query once. Returns None if no embedding model resolved."""
+        model = object.__getattribute__(self, "_embedding_model")
+        if model is None:
+            return None
+        vec = model.embed_query(query)
+        return np.array(vec, dtype=np.float32)
+
+    def _accumulate_chunks_batch(
+        self, docs_to_embed: list[tuple[str, Document]]
+    ) -> None:
+        """
+        Embed all chunks from a single query in one batch call to
+        embed_documents(), then store them. This avoids N separate API
+        calls when multiple chunks come back from global RAG in one query.
+        Falls back to embed_query per-doc if embed_documents is unavailable.
+        """
+        model       = object.__getattribute__(self, "_embedding_model")
+        chunk_store = object.__getattribute__(self, "_chunk_store")
+        if model is None or not docs_to_embed:
+            return
+
+        texts = [gdoc.page_content for _, gdoc in docs_to_embed]
+
+        try:
+            if callable(getattr(model, "embed_documents", None)):
+                vectors = model.embed_documents(texts)
+            else:
+                # Fallback: embed one at a time if embed_documents not available
+                vectors = [model.embed_query(t) for t in texts]
+        except Exception:
+            return  # embedding failure is non-fatal
+
+        import zlib
+        for (doc_id, gdoc), vector in zip(docs_to_embed, vectors):
+            meta = gdoc.metadata or {}
+            chunk_idx = meta.get("chunk_index")
+            if chunk_idx is None:
+                chunk_idx = zlib.crc32(gdoc.page_content.encode("utf-8"))
+
+            chunk = {
+                "chunk_index": chunk_idx,
+                "text":        gdoc.page_content,
+                "vector":      vector,
+                "section":     meta.get("section_heading", ""),
+                "hit_count":   0,
+                "last_hit_at": None,
+            }
+            chunk_store.add_chunks(self.user_id, doc_id, [chunk])
+
+
+
     def _is_relevant(self, query: str, content: str) -> bool:
         """
-        Lightweight keyword overlap check for CLAIMED doc cache hits.
-        Override with embedding similarity for stricter matching.
+        Lightweight keyword overlap check for cache hits when no embedding
+        model is available.
         """
         query_terms   = set(query.lower().split())
         content_lower = content.lower()

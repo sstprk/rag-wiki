@@ -88,6 +88,7 @@ class RedisStateStore(StateStore):
             "no_resiluggest_until": _dt_to_str(record.no_resiluggest_until) or "",
             "next_suggest_at":      str(record.next_suggest_at),
             "queries_missed":       str(record.queries_missed),
+            "cache_miss_streak":    str(record.cache_miss_streak),
         }
 
     def _hash_to_record(self, data: dict[bytes | str, bytes | str]) -> UserDocRecord:
@@ -116,6 +117,7 @@ class RedisStateStore(StateStore):
             no_resiluggest_until = _str_to_dt(_v("no_resiluggest_until")),
             next_suggest_at      = int(_v("next_suggest_at") or "0"),
             queries_missed       = int(_v("queries_missed") or "0"),
+            cache_miss_streak    = int(_v("cache_miss_streak") or "0"),
         )
 
     # ─── Index management ─────────────────────────────────────────────────────

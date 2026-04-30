@@ -57,6 +57,7 @@ class SQLiteStateStore(StateStore):
             Column("no_resiluggest_until", DateTime),
             Column("next_suggest_at",      Integer, nullable=False, default=0),
             Column("queries_missed",       Integer, nullable=False, default=0),
+            Column("cache_miss_streak",    Integer, nullable=False, default=0),
         )
 
     # ─── Helpers ───────────────────────────────────────────────────────────────
@@ -80,6 +81,7 @@ class SQLiteStateStore(StateStore):
             no_resiluggest_until = row.no_resiluggest_until,
             next_suggest_at      = row.next_suggest_at if hasattr(row, "next_suggest_at") else 0,
             queries_missed       = row.queries_missed if hasattr(row, "queries_missed") else 0,
+            cache_miss_streak    = row.cache_miss_streak if hasattr(row, "cache_miss_streak") else 0,
         )
 
     def _record_to_dict(self, record: UserDocRecord) -> dict:
@@ -101,6 +103,7 @@ class SQLiteStateStore(StateStore):
             "no_resiluggest_until": record.no_resiluggest_until,
             "next_suggest_at":      record.next_suggest_at,
             "queries_missed":       record.queries_missed,
+            "cache_miss_streak":    record.cache_miss_streak,
         }
 
     # ─── StateStore interface ──────────────────────────────────────────────────

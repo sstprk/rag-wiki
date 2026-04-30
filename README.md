@@ -23,9 +23,9 @@ Standard RAG is stateless — every query hits the vector database fresh, return
 `langchain-rag-wiki` wraps any LangChain retriever and adds a personal knowledge layer on top:
 
 - Documents retrieved repeatedly get **suggested for saving** after a configurable threshold
-- Once saved, they're served from a **local cache** — no vector search, deterministic results
+- Once saved, their chunks are searched **semantically** using cosine similarity — no external infrastructure, just numpy
 - Every response shows a **provenance block** so you always know which document was used and from where
-- A **decay model** keeps the cache honest — stale documents fade out automatically
+- A **decay model** keeps the cache honest — stale documents fade out automatically, and docs that consistently miss queries get demoted immediately
 
 It's a drop-in `BaseRetriever`. Any LangChain chain, agent, or RAG pipeline that accepts a retriever works with it immediately.
 
@@ -77,13 +77,17 @@ python example.py
 
 ## How It Works
 
-Every query goes through three retrieval tiers in order:
+### Retrieval Flow
+
+Every query goes through two stages:
 
 ```
-1. PINNED docs    → always injected into context (user explicitly pinned these)
-2. CLAIMED cache  → direct local lookup, skips vector search entirely
-3. Global RAG     → fallback to your existing vector retriever
+1. Semantic cache search  → PINNED + CLAIMED docs searched via cosine similarity
+                            (keyword fallback if no embedding model available)
+2. Global RAG fallback    → your existing vector retriever
 ```
+
+Chunk vectors are accumulated **upon user claim** — when a user accepts a suggestion, the full document is automatically chunked, embedded, and stored in the local cache. From then on, it can be searched semantically without hitting the global DB.
 
 ### Document Lifecycle
 
@@ -99,14 +103,35 @@ GLOBAL → SURFACED → SUGGESTED → CLAIMED → PINNED
 |-------|--------------|----------------|
 | `GLOBAL` | In the shared vector DB only | Vector similarity search |
 | `SURFACED` | Retrieved at least once; counter is active | Vector search (counter increments) |
-| `SUGGESTED` | Fetch count ≥ threshold; user prompted once | Vector search (pending decision) |
-| `CLAIMED` | User saved it; full doc in local cache | Direct local lookup |
-| `PINNED` | Consistently relevant; auto-promoted | Always injected into context |
-| `DEMOTED` | Usage dropped; evicted from cache | Returns to vector search |
+| `SUGGESTED` | Fetch count ≥ threshold; user prompted | Vector search (pending decision) |
+| `CLAIMED` | User saved it; chunks in local cache | Semantic chunk search |
+| `PINNED` | Consistently relevant; auto-promoted | Semantic chunk search (always included) |
+| `DEMOTED` | Usage dropped or cache misses exceeded; evicted | Returns to vector search |
+
+### Semantic Cache Search
+
+When a document is CLAIMED or PINNED, its chunks are searched using proper cosine similarity:
+
+```python
+# Embed query once, reused across all cached docs
+query_vec = embedding_model.embed_query(query)
+
+# For each cached doc: score all chunks, inject top-k above threshold
+scores = cosine_similarity(query_vec, chunk_matrix)
+top_chunks = chunks[scores >= similarity_threshold][:local_top_k]
+```
+
+Vectors are always normalised before the dot product, so scores are in `[-1, 1]` regardless of the embedding model's output magnitude.
+
+The embedding model is resolved automatically — if your global retriever has an `embeddings` attribute, it's reused. You can also pass one explicitly. If neither is available, the system falls back to keyword matching silently.
+
+### Auto-Demotion
+
+If a cached document's chunks consistently fail the similarity check across `max_cache_miss_streak` consecutive queries, it is demoted immediately — no need to wait for the daily decay job. Its chunk index is deleted and it returns to the global vector search pool.
 
 ### Threshold and Suggestion
 
-The save suggestion fires **once** when a document has been retrieved `fetch_threshold` times (default: 3). If the user declines, it won't re-surface for `no_resiluggest_days` (default: 30 days). The `reset_threshold` setting resets the fetch count if the document hasn't appeared in that many consecutive queries — so only genuinely recurring documents get suggested.
+The save suggestion fires when a document has been retrieved `fetch_threshold` times. If the user declines, the next suggestion is scheduled at `fetch_count + threshold × 2` — doubling the gap each time. The `reset_threshold` setting resets the fetch count if the document hasn't appeared in that many consecutive queries.
 
 ### Decay Model
 
@@ -114,9 +139,10 @@ A background job recomputes each document's relevance score daily:
 
 ```
 decay_score = weighted_avg(
-    recency_factor   = exp(-λ × days_since_last_fetch),
-    frequency_factor = min(fetch_count / freq_cap, 1.0),
-    explicit_signal  = thumbs_up / thumbs_down value,
+    recency_factor   = exp(-λ × days_since_last_fetch),   weight: 0.40
+    frequency_factor = min(fetch_count / freq_cap, 1.0),  weight: 0.30
+    explicit_signal  = thumbs_up / thumbs_down value,     weight: 0.20
+    chunk_hit_rate   = fraction of chunks ever matched,   weight: 0.15
 )
 ```
 
@@ -130,18 +156,16 @@ After every query, `retriever.last_provenance.render()` outputs:
 ────────────────────────────────────────────────────────────
 📄 Sources used in this response
   • Kubernetes Pod Basics [from your KB]
-    Chunks 0, 2 of 5  |  Saved to your KB
+    Chunks 0, 2  |  Saved to your KB
   • Docker Image Guide
-    Chunks 1 of 8  |  SURFACED (fetched 2×)
+    Full document  |  SURFACED (fetched 2×)
 
 💡 "Docker Image Guide" has appeared in your queries 3 times.
    Would you like to save it to your personal knowledge base?
-
-   [ Save to my KB ]   [ Not now ]
 ────────────────────────────────────────────────────────────
 ```
 
-The provenance block is also available as a structured dict via `retriever.last_provenance.to_dict()` for API consumers.
+Also available as a structured dict via `retriever.last_provenance.to_dict()`.
 
 ---
 
@@ -149,20 +173,26 @@ The provenance block is also available as a structured dict via `retriever.last_
 
 ### Ingesting Documents
 
-Use the included `ingest.py` as a starting point. It loads `.txt` files from a folder, splits them into chunks, injects the required metadata, and stores them in Chroma using Ollama embeddings:
+Use the included `ingest.py` as a starting point. It loads `.txt` files, splits them into chunks, injects the required metadata, and stores them in Chroma using Ollama embeddings:
 
 ```bash
 python ingest.py
 ```
 
-The metadata fields `doc_id`, `doc_title`, and `doc_path` on each chunk are what connect the vector store to the lifecycle tracking system. Without them, fetch counting and cache promotion won't work. If you write your own ingestion pipeline, make sure every chunk carries these fields.
+The metadata fields `doc_id`, `doc_title`, and `doc_path` on each chunk connect the vector store to the lifecycle tracking system. Without them, fetch counting and cache promotion won't work.
 
 ### Chroma + Ollama (fully local, no API key)
+
+The embedding model is auto-resolved from the Chroma vectorstore — no need to pass it separately.
 
 ```python
 from langchain_chroma import Chroma
 from langchain_ollama import OllamaEmbeddings
-from rag_wiki import RagWikiRetriever, MemoryStateStore
+from rag_wiki import RagWikiRetriever, RagWikiRetrieverConfig
+from rag_wiki.storage.sqlite import SQLiteStateStore
+import os
+
+os.makedirs("wiki/documents", exist_ok=True)
 
 vectorstore = Chroma(
     collection_name    = "my_docs",
@@ -173,30 +203,29 @@ vectorstore = Chroma(
 retriever = RagWikiRetriever(
     user_id          = "user-1",
     global_retriever = vectorstore.as_retriever(search_kwargs={"k": 5}),
-    state_store      = MemoryStateStore(),
+    state_store      = SQLiteStateStore("sqlite:///./wiki/rag_wiki_state.db"),
+    config           = RagWikiRetrieverConfig(
+        fetch_threshold      = 3,
+        similarity_threshold = 0.75,
+        wiki_save_dir        = "wiki/documents",
+    ),
 )
 
 docs = retriever.invoke("your query here")
 print(retriever.last_provenance.render())
 ```
 
-### Chroma + OpenAI
+### Passing an Embedding Model Explicitly
+
+If your retriever doesn't expose an `embeddings` attribute, pass the model directly:
 
 ```python
-from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
-from rag_wiki import RagWikiRetriever, MemoryStateStore
-
-vectorstore = Chroma(
-    collection_name    = "my_docs",
-    embedding_function = OpenAIEmbeddings(),
-    persist_directory  = "./chroma_db",
-)
 
 retriever = RagWikiRetriever(
     user_id          = "user-1",
-    global_retriever = vectorstore.as_retriever(search_kwargs={"k": 5}),
-    state_store      = MemoryStateStore(),
+    global_retriever = your_retriever,
+    embedding_model  = OpenAIEmbeddings(),
 )
 ```
 
@@ -223,13 +252,11 @@ retriever = RagWikiRetriever(
 
 ## User Actions
 
-After retrieving documents, users can provide explicit signals:
-
 ```python
-# User confirmed: save this document to personal KB
-retriever.accept_suggestion(doc_id="doc-1", full_content="full document text")
+# Save document to personal KB (chunks already accumulated at retrieval time)
+retriever.accept_suggestion(doc_id="doc-1")
 
-# User dismissed: don't ask again for 30 days
+# Decline — next suggestion scheduled at escalating interval
 retriever.decline_suggestion(doc_id="doc-1")
 
 # Explicit positive signal — boosts decay score
@@ -241,7 +268,7 @@ retriever.thumbs_down(doc_id="doc-1")
 # Always include this document in every query context
 retriever.force_pin(doc_id="doc-1")
 
-# Remove from personal KB entirely
+# Remove from personal KB entirely (also deletes chunk index)
 retriever.force_remove(doc_id="doc-1")
 ```
 
@@ -255,17 +282,21 @@ retriever.force_remove(doc_id="doc-1")
 |-----------|------|---------|-------------|
 | `fetch_threshold` | `int` | `3` | Fetch count before save suggestion fires |
 | `reset_threshold` | `int` | `3` | Queries without a hit before fetch count resets |
-| `no_resiluggest_days` | `int` | `30` | Days to block re-suggestion after a decline |
-| `wiki_save_dir` | `str \| None` | `None` | Directory to save accepted docs to disk; `None` disables |
+| `similarity_threshold` | `float` | `0.75` | Cosine similarity cutoff for cache chunk hits |
+| `local_top_k` | `int` | `3` | Max chunks to inject per cached doc per query |
+| `wiki_save_dir` | `str \| None` | `None` | Directory to save accepted doc copies; `None` disables |
+| `no_resiluggest_days` | `int` | `30` | Deprecated — kept for API compatibility |
 | `decay` | `DecayConfig` | *(see below)* | Decay engine settings |
 
 ### `DecayConfig`
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `w_recency` | `float` | `0.5` | Weight for recency in decay score |
-| `w_frequency` | `float` | `0.3` | Weight for frequency |
-| `w_explicit` | `float` | `0.2` | Weight for explicit user signals |
+| `w_recency` | `float` | `0.40` | Weight for recency in decay score |
+| `w_frequency` | `float` | `0.30` | Weight for frequency |
+| `w_explicit` | `float` | `0.20` | Weight for explicit user signals |
+| `w_chunk_hit` | `float` | `0.15` | Weight for chunk hit rate |
+| `max_cache_miss_streak` | `int` | `10` | Consecutive cache misses before immediate demotion |
 | `decay_lambda` | `float` | `0.05` | Decay steepness λ (half-life ≈ 14 days) |
 | `freq_cap` | `int` | `20` | Max fetch count for frequency normalisation |
 | `pin_threshold` | `float` | `0.85` | Score above which doc is auto-pinned |
@@ -307,21 +338,9 @@ store = RedisStateStore(client)
 
 Required when running multiple API workers or load-balancing. Uses Redis hashes and sets for fast state queries.
 
-Pass any store to the retriever:
-
-```python
-retriever = RagWikiRetriever(
-    user_id          = "user-1",
-    global_retriever = your_retriever,
-    state_store      = store,   # swap freely
-)
-```
-
 ---
 
 ## Decay Scheduler
-
-Run the decay engine on a background schedule so document states stay current:
 
 ```python
 from rag_wiki import DecayEngine, DecayConfig, MemoryStateStore
@@ -333,11 +352,8 @@ engine    = DecayEngine(store, StateMachine(), config=DecayConfig())
 scheduler = DecayScheduler(engine, store, backend="simple", interval_hours=24)
 
 scheduler.start()
-
-# Manual triggers:
-scheduler.run_now("user-123")   # single user
+scheduler.run_now("user-123")   # manual trigger for one user
 scheduler.run_all_users()       # all users with CLAIMED or PINNED docs
-
 scheduler.stop()
 ```
 
@@ -347,15 +363,14 @@ Use `backend="apscheduler"` for production (requires `pip install 'langchain-rag
 
 ## LlamaIndex Adapter
 
-Wrap any LlamaIndex retriever as a global backend:
-
 ```python
 from llama_index.core import VectorStoreIndex
 from rag_wiki.adapters.llamaindex import LlamaIndexRetrieverAdapter
 from rag_wiki import RagWikiRetriever
 
-li_retriever = index.as_retriever(similarity_top_k=5)
-adapter      = LlamaIndexRetrieverAdapter(llama_retriever=li_retriever)
+adapter = LlamaIndexRetrieverAdapter(
+    llama_retriever=index.as_retriever(similarity_top_k=5)
+)
 
 retriever = RagWikiRetriever(
     user_id          = "user-1",
@@ -385,6 +400,7 @@ rag_wiki/
 ├── scheduler.py             # DecayScheduler (simple + APScheduler backends)
 ├── storage/
 │   ├── base.py              # StateStore ABC + UserDocRecord + DocumentState
+│   ├── chunk_store.py       # ChunkStore — chunk-level vector cache (disk + memory)
 │   ├── memory.py            # MemoryStateStore (default, zero deps)
 │   ├── sqlite.py            # SQLiteStateStore
 │   └── redis_store.py       # RedisStateStore
