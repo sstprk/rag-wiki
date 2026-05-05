@@ -89,6 +89,7 @@ class RedisStateStore(StateStore):
             "next_suggest_at":      str(record.next_suggest_at),
             "queries_missed":       str(record.queries_missed),
             "cache_miss_streak":    str(record.cache_miss_streak),
+            "always_full_doc":      "1" if record.always_full_doc else "0",
         }
 
     def _hash_to_record(self, data: dict[bytes | str, bytes | str]) -> UserDocRecord:
@@ -118,6 +119,7 @@ class RedisStateStore(StateStore):
             next_suggest_at      = int(_v("next_suggest_at") or "0"),
             queries_missed       = int(_v("queries_missed") or "0"),
             cache_miss_streak    = int(_v("cache_miss_streak") or "0"),
+            always_full_doc      = _v("always_full_doc") == "1",
         )
 
     # ─── Index management ─────────────────────────────────────────────────────

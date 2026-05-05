@@ -6,3 +6,4 @@ wiki
 chroma_db
 .vscode
 dist
+.env

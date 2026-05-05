@@ -21,7 +21,7 @@ from rag_wiki import (
     RagWikiRetrieverConfig,
     MemoryStateStore,
 )
-from rag_wiki.lifecycle.fetch_counter import SuggestionEvent
+from rag_wiki.lifecycle.fetch_counter import AutoSaveEvent
 
 
 # ─── Mock retriever ───────────────────────────────────────────────────────────
@@ -84,11 +84,11 @@ class MockRetriever(BaseRetriever):
 def main() -> None:
     """Run the full simulation loop."""
     store = MemoryStateStore()
-    suggestion_events: list[SuggestionEvent] = []
+    auto_save_events: list[AutoSaveEvent] = []
 
-    def on_suggestion(event: SuggestionEvent) -> None:
-        suggestion_events.append(event)
-        print(f"\n💡 SUGGESTION FIRED: \"{event.doc_title}\" "
+    def on_auto_save(event: AutoSaveEvent) -> None:
+        auto_save_events.append(event)
+        print(f"\n✅ AUTO-SAVED: \"{event.doc_title}\" "
               f"(fetched {event.fetch_count}× for user {event.user_id})")
 
     retriever = RagWikiRetriever(
@@ -96,12 +96,12 @@ def main() -> None:
         global_retriever=MockRetriever(),
         state_store=store,
         config=RagWikiRetrieverConfig(fetch_threshold=2),
-        on_suggestion=on_suggestion,
+        on_auto_save=on_auto_save,
     )
 
-    # ── Phase 1: 5 queries → triggers suggestions ─────────────────────────────
+    # ── Phase 1: 5 queries → auto-save fires at threshold ─────────────────────
     print("=" * 60)
-    print("PHASE 1: 5 queries (fetch_threshold=2, suggestions will fire)")
+    print("PHASE 1: 5 queries (fetch_threshold=2, auto-save will fire)")
     print("=" * 60)
 
     for i in range(1, 6):
@@ -110,24 +110,9 @@ def main() -> None:
         print(f"  Retrieved {len(docs)} documents")
         print(retriever.last_provenance.render())
 
-    # ── Accept the first suggestion ───────────────────────────────────────────
-    if suggestion_events:
-        first = suggestion_events[0]
-        print(f"\n✅ ACCEPTING suggestion for \"{first.doc_title}\"")
-        retriever.accept_suggestion(
-            doc_id=first.doc_id,
-            full_content=(
-                "Kubernetes uses pods as the smallest deployable unit. "
-                "Each pod runs one or more containers sharing network and storage. "
-                "Pods are ephemeral — when they crash, the controller creates new ones. "
-                "You can group related containers in a single pod for tight coupling."
-            ),
-        )
-        print(f"  → Document is now CLAIMED and cached locally.\n")
-
-    # ── Phase 2: 3 more queries → cached doc served directly ──────────────────
+    # ── Phase 2: 3 more queries → auto-saved docs served from cache ───────────
     print("=" * 60)
-    print("PHASE 2: 3 more queries (claimed doc served from cache)")
+    print("PHASE 2: 3 more queries (auto-saved docs served from cache)")
     print("=" * 60)
 
     for i in range(6, 9):
@@ -155,8 +140,8 @@ def main() -> None:
     print("\n" + "=" * 60)
     print("SUMMARY")
     print("=" * 60)
-    print(f"  Total suggestions fired: {len(suggestion_events)}")
-    for evt in suggestion_events:
+    print(f"  Total auto-saves: {len(auto_save_events)}")
+    for evt in auto_save_events:
         print(f"    • {evt.doc_title} (doc_id={evt.doc_id}, "
               f"fetches={evt.fetch_count})")
 

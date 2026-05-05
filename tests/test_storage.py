@@ -100,3 +100,18 @@ class TestDelete:
 
     def test_delete_nonexistent_is_noop(self, store):
         store.delete("user-1", "doc-999")   # should not raise
+
+
+class TestAlwaysFullDocPersistence:
+    def test_always_full_doc_persists_in_sqlite(self, store):
+        r = make_record(user_state=DocumentState.CLAIMED, always_full_doc=True)
+        store.upsert(r)
+        fetched = store.get("user-1", "doc-1")
+        assert fetched.always_full_doc is True
+
+    def test_always_full_doc_defaults_false_on_new_record(self, store):
+        r = make_record()
+        assert r.always_full_doc is False
+        store.upsert(r)
+        fetched = store.get("user-1", "doc-1")
+        assert fetched.always_full_doc is False

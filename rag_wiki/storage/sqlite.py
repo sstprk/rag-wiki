@@ -58,6 +58,7 @@ class SQLiteStateStore(StateStore):
             Column("next_suggest_at",      Integer, nullable=False, default=0),
             Column("queries_missed",       Integer, nullable=False, default=0),
             Column("cache_miss_streak",    Integer, nullable=False, default=0),
+            Column("always_full_doc",      Boolean, nullable=False, default=False),
         )
 
     # ─── Helpers ───────────────────────────────────────────────────────────────
@@ -82,6 +83,7 @@ class SQLiteStateStore(StateStore):
             next_suggest_at      = row.next_suggest_at if hasattr(row, "next_suggest_at") else 0,
             queries_missed       = row.queries_missed if hasattr(row, "queries_missed") else 0,
             cache_miss_streak    = row.cache_miss_streak if hasattr(row, "cache_miss_streak") else 0,
+            always_full_doc      = bool(row.always_full_doc) if hasattr(row, "always_full_doc") else False,
         )
 
     def _record_to_dict(self, record: UserDocRecord) -> dict:
@@ -104,6 +106,7 @@ class SQLiteStateStore(StateStore):
             "next_suggest_at":      record.next_suggest_at,
             "queries_missed":       record.queries_missed,
             "cache_miss_streak":    record.cache_miss_streak,
+            "always_full_doc":      record.always_full_doc,
         }
 
     # ─── StateStore interface ──────────────────────────────────────────────────
