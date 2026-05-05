@@ -329,5 +329,27 @@ In a distributed environment with Redis, ensure only **one** scheduler instance 
 | `freq_cap` | `20` | Max fetch count for frequency normalisation |
 | `pin_threshold` | `0.85` | Score above which doc is auto-pinned |
 | `demotion_threshold` | `0.15` | Score below which doc is auto-demoted |
-| `pin_hold_days` | `7` | Days score must hold above threshold before pin fires |
 | `demotion_hold_days` | `3` | Days score must hold below threshold before demotion fires |
+
+---
+
+## 9. Benchmarking
+
+`rag-wiki` includes a built-in benchmark script (`benchmark.py`) to validate the performance and relevance gains against your global retriever.
+
+### Relevance Scoring
+The benchmark uses a **cross-encoder** (`cross-encoder/ms-marco-MiniLM-L-6-v2`) rather than cosine similarity to score retrieval quality. Cross-encoders evaluate the full `(query, document_snippet)` pair and provide highly calibrated relevance logits, which are then normalized using a sigmoid function. This avoids the "circular validation" problem where the same embedding model is used for both retrieval and evaluation.
+
+### Running the Benchmark
+Ensure you have the required dependencies:
+```bash
+pip install sentence-transformers
+```
+
+By default, the benchmark runs against a local Chroma instance. To run it against Pinecone, ensure your `.env` file contains `PINECONE_API_KEY` and `PINECONE_INDEX_NAME`.
+
+```bash
+python benchmark.py
+```
+
+The benchmark runs 20 real-world queries in a cold-start scenario and generates performance distributions (response times, token usage, context relevance) in the `benchmark_results/` directory. Typically, `rag-wiki` will yield a much higher average context relevance by isolating the noise and fetching fewer, highly pertinent chunks directly from your cache.

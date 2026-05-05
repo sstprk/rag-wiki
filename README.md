@@ -169,6 +169,29 @@ Also available as a structured dict via `retriever.last_provenance.to_dict()`.
 
 ---
 
+## Benchmark Results
+
+We benchmark the performance of `langchain-rag-wiki` against a standard "Plain RAG" pipeline using an isolated, real-world query set. The benchmark evaluates both performance (response time, token usage) and retrieval quality using the `cross-encoder/ms-marco-MiniLM-L-6-v2` model for calibrated relevance scoring.
+
+![Radar Summary](assets/07_radar_summary.png)
+
+**Summary against Pinecone (remote, cold start):**
+
+- **Context Relevance:** RAG-Wiki consistently retrieves far more relevant context from the personal knowledge base (avg score **0.327** vs Plain RAG's **0.161**). By fetching chunks proven to be useful for the user, it achieves significantly better context fit without introducing noise.
+  
+  ![Context Relevance](assets/03_context_relevance.png)
+
+- **Chunk Efficiency:** RAG-Wiki injects fewer, higher-quality chunks (avg **2.9 chunks** vs Plain RAG's fixed **5.0 chunks**). This leads to fewer tokens used in context, saving LLM execution cost.
+  
+  ![Chunks Retrieved](assets/04_chunks_retrieved.png)
+
+- **Cache Hit Rate:** **100%** of the test queries hit the local cache once the documents were populated, completely bypassing the remote Pinecone index for those documents.
+- **Overhead:** RAG-Wiki adds a modest ~100ms overhead for cache maintenance and semantic searching on a cold start, which amortizes heavily as the cache warms up.
+
+  ![Response Time](assets/01_response_time.png)
+
+---
+
 ## Connecting to a Real Vector DB
 
 ### Ingesting Documents

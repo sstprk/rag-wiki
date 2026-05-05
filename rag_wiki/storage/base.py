@@ -34,6 +34,7 @@ class UserDocRecord:
     next_suggest_at:     int           = 0    # fetch_count target for next suggestion (0 = use threshold)
     queries_missed:      int           = 0    # consecutive queries where doc was not retrieved
     cache_miss_streak:   int           = 0    # consecutive queries where no chunk scored >= threshold
+    always_full_doc:     bool          = False  # inject full doc text instead of matched chunks
 
 
 class StateStore(ABC):

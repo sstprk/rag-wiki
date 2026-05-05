@@ -3,6 +3,9 @@ chat.py — Interactive chat with Qwen + RAG Wiki
 
 Sends your prompts to a local Qwen model (via Ollama) and automatically
 enriches each query with context retrieved from the RAG wiki system.
+
+Documents are auto-saved to your personal KB after repeated access —
+no manual accept/decline needed.
 """
 
 from langchain_chroma import Chroma
@@ -33,10 +36,9 @@ vectorstore = Chroma(
     persist_directory=CHROMA_DIR,
 )
 
-pending_suggestions: list = []
-
-def on_suggestion(event):
-    pending_suggestions.append(event)
+def on_auto_save(event):
+    print(f"\n✅ Auto-saved \"{event.doc_title}\" to your personal KB "
+          f"(fetched {event.fetch_count}×)")
 
 retriever = RagWikiRetriever(
     user_id=USER_ID,
@@ -47,7 +49,7 @@ retriever = RagWikiRetriever(
         reset_threshold=3,
         wiki_save_dir=WIKI_SAVE_DIR,
     ),
-    on_suggestion=on_suggestion,
+    on_auto_save=on_auto_save,
 )
 
 llm = OllamaLLM(model=OLLAMA_MODEL)
@@ -81,22 +83,6 @@ def format_docs(docs) -> str:
         for doc in docs
     )
 
-def handle_suggestions():
-    """Prompt the user to accept or decline wiki save suggestions."""
-    for event in pending_suggestions:
-        print(
-            f"\n💡 '{event.doc_title}' has come up {event.fetch_count}× — "
-            "save to personal library?"
-        )
-        answer = input("   [y/n]: ").strip().lower()
-        if answer == "y":
-            retriever.accept_suggestion(event.doc_id)
-            print("   ✅ Saved — next query will load directly from wiki")
-        else:
-            retriever.decline_suggestion(event.doc_id)
-            print("   ⏭  Skipped — will suggest again after threshold resets")
-    pending_suggestions.clear()
-
 def ask(question: str) -> str:
     """Retrieve context via RAG wiki, then query Qwen."""
     docs = retriever.invoke(question)
@@ -114,6 +100,7 @@ def ask(question: str) -> str:
 def main():
     print("=" * 60)
     print(f"  RAG Wiki + Qwen Chat  (model: {OLLAMA_MODEL})")
+    print("  Documents are auto-saved after repeated access.")
     print("  Type 'exit' or 'quit' to stop.")
     print("=" * 60)
 
@@ -136,9 +123,6 @@ def main():
             print(f"\nQwen: {answer}")
         except Exception as e:
             print(f"\n⚠️  Error: {e}")
-
-        # Handle any wiki save suggestions after each turn
-        handle_suggestions()
 
 if __name__ == "__main__":
     main()

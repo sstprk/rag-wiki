@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from rag_wiki.storage.base import DocumentState, UserDocRecord
-from rag_wiki.lifecycle.fetch_counter import SuggestionEvent
+from rag_wiki.lifecycle.fetch_counter import AutoSaveEvent
 
 
 @dataclass
@@ -27,7 +27,8 @@ class SourceEntry:
 @dataclass
 class ProvenanceBlock:
     sources:    list[SourceEntry]
-    suggestion: Optional[SuggestionEvent] = None
+    auto_save:  Optional[AutoSaveEvent] = None
+    embedding_model_resolved: bool = True
 
     # ─── Text rendering ────────────────────────────────────────────────────────
 
@@ -49,10 +50,14 @@ class ProvenanceBlock:
             if src.section_heading:
                 lines.append(f"    Section: {src.section_heading}")
 
-        if self.suggestion:
-            lines += self._render_suggestion(self.suggestion)
+        if self.auto_save:
+            lines += self._render_auto_save(self.auto_save)
 
         lines.append("─" * 60)
+        mode = "Semantic" if self.embedding_model_resolved else "Keyword Fallback"
+        cache_hits = sum(1 for s in self.sources if s.from_cache)
+        lines.append(f"  Mode: {mode}  |  Cache: {cache_hits}/{len(self.sources)} docs local")
+        
         return "\n".join(lines)
 
     def to_dict(self) -> dict:
@@ -72,11 +77,11 @@ class ProvenanceBlock:
                 }
                 for s in self.sources
             ],
-            "suggestion": {
-                "doc_id":    self.suggestion.doc_id,
-                "doc_title": self.suggestion.doc_title,
-                "fetch_count": self.suggestion.fetch_count,
-            } if self.suggestion else None,
+            "auto_save": {
+                "doc_id":      self.auto_save.doc_id,
+                "doc_title":   self.auto_save.doc_title,
+                "fetch_count": self.auto_save.fetch_count,
+            } if self.auto_save else None,
         }
 
     # ─── Helpers ───────────────────────────────────────────────────────────────
@@ -99,15 +104,12 @@ class ProvenanceBlock:
         total  = f" of {src.total_chunks}" if src.total_chunks else ""
         return f"Chunks {chunks}{total}"
 
-    def _render_suggestion(self, s: SuggestionEvent) -> list[str]:
+    def _render_auto_save(self, s: AutoSaveEvent) -> list[str]:
         return [
             "",
-            f"💡 \"{s.doc_title}\" has appeared in your queries {s.fetch_count} times.",
-            "   Would you like to save it to your personal knowledge base",
-            "   for faster, direct access?",
-            "",
-            "   [ Save to my KB ]   [ Not now ]",
-            "   → Call retriever.accept_suggestion() or retriever.decline_suggestion()",
+            f"✅ \"{s.doc_title}\" has appeared in your queries {s.fetch_count} times.",
+            "   It has been automatically saved to your personal knowledge base",
+            "   for faster, direct access.",
         ]
 
 
@@ -121,7 +123,10 @@ class ProvenanceBuilder:
         self,
         retrieved_docs: list[dict],          # list of dicts with chunk metadata
         user_records:   dict[str, UserDocRecord],  # doc_id → UserDocRecord
-        suggestion:     Optional[SuggestionEvent] = None,
+        auto_save:      Optional[AutoSaveEvent] = None,
+        # Backwards compat alias
+        suggestion:     Optional[AutoSaveEvent] = None,
+        embedding_model_resolved: bool = True,
     ) -> ProvenanceBlock:
         """
         retrieved_docs: each dict must have at minimum:
@@ -129,6 +134,8 @@ class ProvenanceBuilder:
             optionally: total_chunks, section_heading
         user_records: mapping from doc_id to its current UserDocRecord
         """
+        effective_event = auto_save or suggestion
+
         # Group chunks by doc_id
         doc_chunks: dict[str, list[dict]] = {}
         for doc in retrieved_docs:
@@ -152,4 +159,8 @@ class ProvenanceBuilder:
                 from_cache      = first.get("from_cache", False),
             ))
 
-        return ProvenanceBlock(sources=sources, suggestion=suggestion)
+        return ProvenanceBlock(
+            sources=sources, 
+            auto_save=effective_event,
+            embedding_model_resolved=embedding_model_resolved,
+        )

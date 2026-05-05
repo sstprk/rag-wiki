@@ -12,7 +12,7 @@ from rag_wiki.storage.base import DocumentState, UserDocRecord
 # Valid transitions: state → set of states it can move to
 TRANSITIONS: dict[DocumentState, list[DocumentState]] = {
     DocumentState.GLOBAL:    [DocumentState.SURFACED],
-    DocumentState.SURFACED:  [DocumentState.SUGGESTED, DocumentState.DEMOTED],
+    DocumentState.SURFACED:  [DocumentState.SUGGESTED, DocumentState.CLAIMED, DocumentState.DEMOTED],
     DocumentState.SUGGESTED: [DocumentState.CLAIMED, DocumentState.SURFACED],
     DocumentState.CLAIMED:   [DocumentState.PINNED, DocumentState.DEMOTED],
     DocumentState.PINNED:    [DocumentState.CLAIMED, DocumentState.DEMOTED],

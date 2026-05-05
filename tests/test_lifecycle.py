@@ -25,7 +25,7 @@ def sm():
 
 @pytest.fixture
 def counter(store, sm):
-    return FetchCounter(store, sm, fetch_threshold=3, no_resiluggest_days=30)
+    return FetchCounter(store, sm, fetch_threshold=3)
 
 @pytest.fixture
 def decay(store, sm):
@@ -52,6 +52,13 @@ class TestStateMachine:
         r = self._record(DocumentState.SURFACED)
         r = sm.transition(r, DocumentState.SUGGESTED)
         assert r.user_state == DocumentState.SUGGESTED
+
+    def test_valid_transition_surfaced_to_claimed(self, sm):
+        """Auto-save: SURFACED → CLAIMED is now a valid transition."""
+        r = self._record(DocumentState.SURFACED)
+        r = sm.transition(r, DocumentState.CLAIMED)
+        assert r.user_state == DocumentState.CLAIMED
+        assert r.cached_at is not None
 
     def test_valid_transition_suggested_to_claimed(self, sm):
         r = self._record(DocumentState.SUGGESTED)
@@ -90,11 +97,11 @@ class TestStateMachine:
 # ─── FetchCounter ─────────────────────────────────────────────────────────────
 
 class TestFetchCounter:
-    def test_first_fetch_returns_no_suggestion(self, counter):
+    def test_first_fetch_returns_no_event(self, counter):
         event = counter.record_fetch("u1", "d1", "Doc", "/kb/doc.pdf")
         assert event is None
 
-    def test_suggestion_fires_at_threshold(self, counter):
+    def test_auto_save_fires_at_threshold(self, counter):
         for i in range(2):
             event = counter.record_fetch("u1", "d1", "Doc", "/kb/doc.pdf")
             assert event is None
@@ -103,54 +110,45 @@ class TestFetchCounter:
         assert event.doc_id == "d1"
         assert event.fetch_count == 3
 
-    def test_suggestion_fires_only_once(self, counter):
-        for _ in range(5):
-            counter.record_fetch("u1", "d1", "Doc", "/kb/doc.pdf")
-        # Reset suggestion_sent to False manually won't happen — check only 1 fires
-        events = []
-        store = counter._store
-        # Already fired after 3rd call — 4th and 5th return None
-        # (covered implicitly by state change to SUGGESTED)
-        record = store.get("u1", "d1")
-        assert record.suggestion_sent is True
-
-    def test_accept_suggestion_transitions_to_claimed(self, counter, store):
+    def test_auto_save_transitions_to_claimed(self, counter, store):
+        """Auto-save automatically transitions doc to CLAIMED."""
         for _ in range(3):
             counter.record_fetch("u1", "d1", "Doc", "/kb/doc.pdf")
-        counter.accept_suggestion("u1", "d1", full_content="full text here")
         record = store.get("u1", "d1")
         assert record.user_state == DocumentState.CLAIMED
-        assert record.full_content == "full text here"
-
-    def test_decline_suggestion_blocks_resiluggest(self, counter, store):
-        for _ in range(3):
-            counter.record_fetch("u1", "d1", "Doc", "/kb/doc.pdf")
-        counter.decline_suggestion("u1", "d1")
-        record = store.get("u1", "d1")
-        assert record.user_state == DocumentState.SURFACED
-        # next_suggest_at is set to an escalated target after decline
-        assert record.next_suggest_at > record.fetch_count
-
-    def test_decline_then_fetch_again_no_suggestion_until_target(self, counter):
-        for _ in range(3):
-            counter.record_fetch("u1", "d1", "Doc", "/kb/doc.pdf")
-        counter.decline_suggestion("u1", "d1")
-        # After decline with threshold=3, next target = fetch_count + threshold*2 = 3+6 = 9
-        # Fetches 4-8 should not fire a suggestion
-        for _ in range(5):
-            event = counter.record_fetch("u1", "d1", "Doc", "/kb/doc.pdf")
-            assert event is None  # not yet at next_suggest_at
 
     def test_no_counter_increment_for_claimed_docs(self, counter, store):
         for _ in range(3):
             counter.record_fetch("u1", "d1", "Doc", "/kb/doc.pdf")
-        counter.accept_suggestion("u1", "d1", full_content="content")
         record_before = store.get("u1", "d1")
         count_before = record_before.fetch_count
         # Further fetches on a CLAIMED doc should not increment
         counter.record_fetch("u1", "d1", "Doc", "/kb/doc.pdf")
         record_after = store.get("u1", "d1")
         assert record_after.fetch_count == count_before
+
+    def test_auto_save_fires_only_once(self, counter, store):
+        """After auto-save to CLAIMED, no more events fire."""
+        events = []
+        for _ in range(5):
+            event = counter.record_fetch("u1", "d1", "Doc", "/kb/doc.pdf")
+            if event:
+                events.append(event)
+        assert len(events) == 1
+
+    def test_threshold_reset_on_miss(self, counter, store):
+        """After reset_threshold consecutive misses, fetch_count resets."""
+        # Build up some fetches
+        counter.record_fetch("u1", "d1", "Doc", "/kb/doc.pdf")
+        counter.record_fetch("u1", "d1", "Doc", "/kb/doc.pdf")
+
+        # 3 consecutive misses resets the counter
+        for _ in range(3):
+            counter.record_miss("u1", "d1")
+
+        record = store.get("u1", "d1")
+        assert record.fetch_count == 0
+        assert record.user_state == DocumentState.SURFACED
 
 
 # ─── DecayEngine ──────────────────────────────────────────────────────────────

@@ -1,0 +1,451 @@
+{
+  "timestamp": "2026-05-05T09:37:50.007683+00:00",
+  "backend": "pinecone",
+  "questions": [
+    "What is Salih Toprak's current role and location?",
+    "What university is Salih studying at and when does he graduate?",
+    "What is Salih's GPA and degree program?",
+    "What Erasmus exchange did Salih complete and where?",
+    "What IEEE paper did Salih co-author and what was it about?",
+    "What T\u00dcB\u0130TAK project did Salih work on?",
+    "What are Salih's main technical skills?",
+    "What internships has Salih completed?",
+    "What is Salih's English proficiency level?",
+    "What are Salih's strengths for applying to European universities?",
+    "What career paths are available in Turkey for a software engineer?",
+    "What are the top tech companies hiring in Turkey?",
+    "What is the average salary for a data scientist in Turkey?",
+    "What are the best cities in Turkey for tech jobs?",
+    "What Turkish government programs support tech startups?",
+    "How does Salih's background align with European master's programs?",
+    "What scholarships could Salih apply for given his profile?",
+    "What programming languages and frameworks does Salih know?",
+    "What research experience does Salih have?",
+    "What is Salih's experience with machine learning and AI?"
+  ],
+  "rag_results": [
+    {
+      "response_time_s": 0.653,
+      "chunks_retrieved": 5,
+      "total_chars": 1819,
+      "estimated_tokens": 454,
+      "estimated_cost_usd": 4.5e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.5645
+    },
+    {
+      "response_time_s": 0.233,
+      "chunks_retrieved": 5,
+      "total_chars": 1920,
+      "estimated_tokens": 480,
+      "estimated_cost_usd": 4.8e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.5727
+    },
+    {
+      "response_time_s": 0.164,
+      "chunks_retrieved": 5,
+      "total_chars": 1962,
+      "estimated_tokens": 490,
+      "estimated_cost_usd": 4.9e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.5824
+    },
+    {
+      "response_time_s": 0.164,
+      "chunks_retrieved": 5,
+      "total_chars": 1928,
+      "estimated_tokens": 482,
+      "estimated_cost_usd": 4.8e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.5575
+    },
+    {
+      "response_time_s": 0.201,
+      "chunks_retrieved": 5,
+      "total_chars": 2057,
+      "estimated_tokens": 514,
+      "estimated_cost_usd": 5.1e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.5742
+    },
+    {
+      "response_time_s": 0.161,
+      "chunks_retrieved": 5,
+      "total_chars": 2226,
+      "estimated_tokens": 556,
+      "estimated_cost_usd": 5.6e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.5493
+    },
+    {
+      "response_time_s": 0.16,
+      "chunks_retrieved": 5,
+      "total_chars": 2288,
+      "estimated_tokens": 572,
+      "estimated_cost_usd": 5.7e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.5695
+    },
+    {
+      "response_time_s": 0.165,
+      "chunks_retrieved": 5,
+      "total_chars": 1668,
+      "estimated_tokens": 417,
+      "estimated_cost_usd": 4.2e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.6231
+    },
+    {
+      "response_time_s": 0.161,
+      "chunks_retrieved": 5,
+      "total_chars": 2040,
+      "estimated_tokens": 510,
+      "estimated_cost_usd": 5.1e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.5296
+    },
+    {
+      "response_time_s": 0.156,
+      "chunks_retrieved": 5,
+      "total_chars": 2149,
+      "estimated_tokens": 537,
+      "estimated_cost_usd": 5.4e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.5964
+    },
+    {
+      "response_time_s": 0.162,
+      "chunks_retrieved": 5,
+      "total_chars": 1819,
+      "estimated_tokens": 454,
+      "estimated_cost_usd": 4.5e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.6295
+    },
+    {
+      "response_time_s": 0.158,
+      "chunks_retrieved": 5,
+      "total_chars": 2152,
+      "estimated_tokens": 538,
+      "estimated_cost_usd": 5.4e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.5926
+    },
+    {
+      "response_time_s": 0.162,
+      "chunks_retrieved": 5,
+      "total_chars": 1909,
+      "estimated_tokens": 477,
+      "estimated_cost_usd": 4.8e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.6572
+    },
+    {
+      "response_time_s": 0.155,
+      "chunks_retrieved": 5,
+      "total_chars": 2152,
+      "estimated_tokens": 538,
+      "estimated_cost_usd": 5.4e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.5959
+    },
+    {
+      "response_time_s": 0.155,
+      "chunks_retrieved": 5,
+      "total_chars": 1726,
+      "estimated_tokens": 431,
+      "estimated_cost_usd": 4.3e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.537
+    },
+    {
+      "response_time_s": 0.162,
+      "chunks_retrieved": 5,
+      "total_chars": 2095,
+      "estimated_tokens": 523,
+      "estimated_cost_usd": 5.2e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.605
+    },
+    {
+      "response_time_s": 0.158,
+      "chunks_retrieved": 5,
+      "total_chars": 1908,
+      "estimated_tokens": 477,
+      "estimated_cost_usd": 4.8e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.5798
+    },
+    {
+      "response_time_s": 0.16,
+      "chunks_retrieved": 5,
+      "total_chars": 2288,
+      "estimated_tokens": 572,
+      "estimated_cost_usd": 5.7e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.5745
+    },
+    {
+      "response_time_s": 0.16,
+      "chunks_retrieved": 5,
+      "total_chars": 2226,
+      "estimated_tokens": 556,
+      "estimated_cost_usd": 5.6e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.5865
+    },
+    {
+      "response_time_s": 0.158,
+      "chunks_retrieved": 5,
+      "total_chars": 2226,
+      "estimated_tokens": 556,
+      "estimated_cost_usd": 5.6e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.6101
+    }
+  ],
+  "wiki_results": [
+    {
+      "response_time_s": 0.847,
+      "chunks_retrieved": 5,
+      "total_chars": 1819,
+      "estimated_tokens": 454,
+      "estimated_cost_usd": 4.5e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.5645
+    },
+    {
+      "response_time_s": 0.459,
+      "chunks_retrieved": 5,
+      "total_chars": 1920,
+      "estimated_tokens": 480,
+      "estimated_cost_usd": 4.8e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.5727
+    },
+    {
+      "response_time_s": 1.319,
+      "chunks_retrieved": 5,
+      "total_chars": 1962,
+      "estimated_tokens": 490,
+      "estimated_cost_usd": 4.9e-05,
+      "from_cache": false,
+      "cache_hit_rate": 0.0,
+      "context_relevance": 0.5824
+    },
+    {
+      "response_time_s": 0.492,
+      "chunks_retrieved": 3,
+      "total_chars": 1930,
+      "estimated_tokens": 482,
+      "estimated_cost_usd": 4.8e-05,
+      "from_cache": true,
+      "cache_hit_rate": 0.667,
+      "context_relevance": 0.5797
+    },
+    {
+      "response_time_s": 0.198,
+      "chunks_retrieved": 2,
+      "total_chars": 2940,
+      "estimated_tokens": 735,
+      "estimated_cost_usd": 7.3e-05,
+      "from_cache": true,
+      "cache_hit_rate": 1.0,
+      "context_relevance": 0.6594
+    },
+    {
+      "response_time_s": 0.259,
+      "chunks_retrieved": 2,
+      "total_chars": 1354,
+      "estimated_tokens": 338,
+      "estimated_cost_usd": 3.4e-05,
+      "from_cache": true,
+      "cache_hit_rate": 1.0,
+      "context_relevance": 0.5955
+    },
+    {
+      "response_time_s": 0.212,
+      "chunks_retrieved": 2,
+      "total_chars": 2291,
+      "estimated_tokens": 572,
+      "estimated_cost_usd": 5.7e-05,
+      "from_cache": true,
+      "cache_hit_rate": 1.0,
+      "context_relevance": 0.6329
+    },
+    {
+      "response_time_s": 0.304,
+      "chunks_retrieved": 4,
+      "total_chars": 2478,
+      "estimated_tokens": 619,
+      "estimated_cost_usd": 6.2e-05,
+      "from_cache": true,
+      "cache_hit_rate": 0.75,
+      "context_relevance": 0.6315
+    },
+    {
+      "response_time_s": 0.27,
+      "chunks_retrieved": 3,
+      "total_chars": 1703,
+      "estimated_tokens": 425,
+      "estimated_cost_usd": 4.3e-05,
+      "from_cache": true,
+      "cache_hit_rate": 0.667,
+      "context_relevance": 0.5533
+    },
+    {
+      "response_time_s": 0.208,
+      "chunks_retrieved": 3,
+      "total_chars": 3919,
+      "estimated_tokens": 979,
+      "estimated_cost_usd": 9.8e-05,
+      "from_cache": true,
+      "cache_hit_rate": 1.0,
+      "context_relevance": 0.6391
+    },
+    {
+      "response_time_s": 0.208,
+      "chunks_retrieved": 3,
+      "total_chars": 4243,
+      "estimated_tokens": 1060,
+      "estimated_cost_usd": 0.000106,
+      "from_cache": true,
+      "cache_hit_rate": 1.0,
+      "context_relevance": 0.6233
+    },
+    {
+      "response_time_s": 0.204,
+      "chunks_retrieved": 3,
+      "total_chars": 3579,
+      "estimated_tokens": 894,
+      "estimated_cost_usd": 8.9e-05,
+      "from_cache": true,
+      "cache_hit_rate": 1.0,
+      "context_relevance": 0.5961
+    },
+    {
+      "response_time_s": 0.271,
+      "chunks_retrieved": 4,
+      "total_chars": 3451,
+      "estimated_tokens": 862,
+      "estimated_cost_usd": 8.6e-05,
+      "from_cache": true,
+      "cache_hit_rate": 0.75,
+      "context_relevance": 0.6639
+    },
+    {
+      "response_time_s": 0.2,
+      "chunks_retrieved": 3,
+      "total_chars": 3344,
+      "estimated_tokens": 836,
+      "estimated_cost_usd": 8.4e-05,
+      "from_cache": true,
+      "cache_hit_rate": 1.0,
+      "context_relevance": 0.6123
+    },
+    {
+      "response_time_s": 0.211,
+      "chunks_retrieved": 3,
+      "total_chars": 2877,
+      "estimated_tokens": 719,
+      "estimated_cost_usd": 7.2e-05,
+      "from_cache": true,
+      "cache_hit_rate": 1.0,
+      "context_relevance": 0.5341
+    },
+    {
+      "response_time_s": 0.213,
+      "chunks_retrieved": 3,
+      "total_chars": 4199,
+      "estimated_tokens": 1049,
+      "estimated_cost_usd": 0.000105,
+      "from_cache": true,
+      "cache_hit_rate": 1.0,
+      "context_relevance": 0.6346
+    },
+    {
+      "response_time_s": 0.213,
+      "chunks_retrieved": 3,
+      "total_chars": 2934,
+      "estimated_tokens": 733,
+      "estimated_cost_usd": 7.3e-05,
+      "from_cache": true,
+      "cache_hit_rate": 1.0,
+      "context_relevance": 0.6149
+    },
+    {
+      "response_time_s": 0.203,
+      "chunks_retrieved": 2,
+      "total_chars": 2633,
+      "estimated_tokens": 658,
+      "estimated_cost_usd": 6.6e-05,
+      "from_cache": true,
+      "cache_hit_rate": 1.0,
+      "context_relevance": 0.6234
+    },
+    {
+      "response_time_s": 0.251,
+      "chunks_retrieved": 2,
+      "total_chars": 2568,
+      "estimated_tokens": 642,
+      "estimated_cost_usd": 6.4e-05,
+      "from_cache": true,
+      "cache_hit_rate": 1.0,
+      "context_relevance": 0.6406
+    },
+    {
+      "response_time_s": 0.203,
+      "chunks_retrieved": 2,
+      "total_chars": 3035,
+      "estimated_tokens": 758,
+      "estimated_cost_usd": 7.6e-05,
+      "from_cache": true,
+      "cache_hit_rate": 1.0,
+      "context_relevance": 0.6229
+    }
+  ],
+  "rag_summary": {
+    "response_time_s": 0.1904,
+    "chunks_retrieved": 5,
+    "estimated_tokens": 506.7,
+    "estimated_cost_usd": 5.07e-05,
+    "context_relevance": 0.584365,
+    "cache_hit_rate": 0.0
+  },
+  "wiki_summary": {
+    "response_time_s": 0.33725,
+    "chunks_retrieved": 3.1,
+    "estimated_tokens": 689.25,
+    "estimated_cost_usd": 6.89e-05,
+    "context_relevance": 0.608855,
+    "cache_hit_rate": 0.7917
+  },
+  "auto_save_log": [
+    3,
+    3,
+    4
+  ]
+}

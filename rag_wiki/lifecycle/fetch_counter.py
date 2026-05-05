@@ -1,17 +1,18 @@
 """
-FetchCounter — increments per-user fetch counts and fires save suggestions.
+FetchCounter — increments per-user fetch counts and auto-saves documents.
 
-Suggestion escalation:
-  - First suggestion fires at fetch_count == fetch_threshold (e.g. 2)
-  - After decline, next suggestion fires at fetch_count + (gap * 2)
-    e.g. threshold=2 → suggest at 2, then 6, then 14, then 30 ...
-  - After accept, no more suggestions (doc is CLAIMED)
+Auto-save (fully automated lifecycle):
+  - When fetch_count reaches fetch_threshold, the document is automatically
+    transitioned to CLAIMED — no user interaction needed.
+  - An AutoSaveEvent is emitted so callers can log / notify.
+  - The save-delete lifecycle is now fully automated:
+    SURFACED → CLAIMED (auto) → PINNED/DEMOTED (via decay)
 
 Threshold reset:
   - Every query, docs that were NOT retrieved have their queries_missed counter
     incremented by the retriever.
-  - When queries_missed >= reset_threshold, fetch_count resets to 0 and
-    next_suggest_at resets, giving the doc a fresh start.
+  - When queries_missed >= reset_threshold, fetch_count resets to 0,
+    giving the doc a fresh start.
 """
 
 from dataclasses import dataclass
@@ -26,8 +27,8 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class SuggestionEvent:
-    """Emitted when a document crosses the fetch threshold."""
+class AutoSaveEvent:
+    """Emitted when a document is auto-saved to the user's personal KB."""
     user_id:     str
     doc_id:      str
     doc_title:   str
@@ -35,10 +36,14 @@ class SuggestionEvent:
     fetch_count: int
 
 
+# Backwards-compatible alias
+SuggestionEvent = AutoSaveEvent
+
+
 class FetchCounter:
     """
     Tracks how many times each user has retrieved each document,
-    and emits a SuggestionEvent when the threshold (or escalated target) is crossed.
+    and auto-saves (transitions to CLAIMED) when the threshold is crossed.
     """
 
     def __init__(
@@ -46,7 +51,7 @@ class FetchCounter:
         store:               StateStore,
         state_machine:       StateMachine,
         fetch_threshold:     int = 3,
-        no_resiluggest_days: int = 30,   # kept for API compat, no longer used for timing
+        no_resiluggest_days: int = 30,   # kept for API compat, unused
         reset_threshold:     int = 3,    # queries without a hit before fetch_count resets
     ):
         self._store           = store
@@ -63,11 +68,11 @@ class FetchCounter:
         doc_title: str,
         doc_path:  str,
         now:       Optional[datetime] = None,
-    ) -> Optional[SuggestionEvent]:
+    ) -> Optional[AutoSaveEvent]:
         """
         Call every time a document is retrieved for a user.
-        Returns a SuggestionEvent if this fetch crosses the current suggestion
-        target, otherwise None.
+        Returns an AutoSaveEvent if this fetch crosses the threshold and the
+        document was auto-saved, otherwise None.
         """
         now = now or datetime.now(timezone.utc)
         record = self._get_or_create(user_id, doc_id, doc_title, doc_path, now)
@@ -81,15 +86,15 @@ class FetchCounter:
         record.fetch_count    += 1
         record.last_fetched_at = now
 
-        suggestion = self._check_suggestion(record)
+        event = self._check_auto_save(record, now)
         self._store.upsert(record)
-        return suggestion
+        return event
 
     def record_miss(self, user_id: str, doc_id: str) -> None:
         """
-        Call for every tracked SURFACED/SUGGESTED doc that was NOT retrieved
+        Call for every tracked SURFACED doc that was NOT retrieved
         in a given query. When queries_missed reaches reset_threshold, the
-        fetch_count and suggestion target are reset.
+        fetch_count is reset.
         """
         record = self._store.get(user_id, doc_id)
         if record is None:
@@ -102,8 +107,6 @@ class FetchCounter:
         if record.queries_missed >= self._reset_threshold:
             record.fetch_count      = 0
             record.queries_missed   = 0
-            record.next_suggest_at  = 0
-            record.suggestion_sent  = False
             record.user_state       = DocumentState.SURFACED
             logger.debug(
                 "Threshold reset for doc_id=%r user_id=%r "
@@ -112,52 +115,6 @@ class FetchCounter:
             )
 
         self._store.upsert(record)
-
-    def accept_suggestion(self, user_id: str, doc_id: str, full_content: str) -> UserDocRecord:
-        """User clicked 'Save to my KB'. Transition to CLAIMED and store content."""
-        record = self._store.get(user_id, doc_id)
-        if record is None:
-            raise ValueError(f"No record for user={user_id}, doc={doc_id}")
-
-        record = self._sm.transition(record, DocumentState.CLAIMED)
-        record.full_content = full_content
-        self._store.upsert(record)
-        return record
-
-    def decline_suggestion(
-        self,
-        user_id: str,
-        doc_id:  str,
-        now:     Optional[datetime] = None,
-    ) -> UserDocRecord:
-        """
-        User clicked 'Not now'. Stay in SURFACED and schedule the next
-        suggestion by doubling the gap each time.
-
-        Example with threshold=2:
-          1st suggestion at fetch_count=2  → next at 6   (gap doubles: 2→4)
-          2nd suggestion at fetch_count=6  → next at 14  (gap doubles: 4→8)
-          3rd suggestion at fetch_count=14 → next at 30  (gap doubles: 8→16)
-        """
-        now = now or datetime.now(timezone.utc)
-        record = self._store.get(user_id, doc_id)
-        if record is None:
-            raise ValueError(f"No record for user={user_id}, doc={doc_id}")
-
-        if record.next_suggest_at == 0:
-            # First decline: initial gap was threshold, next gap is threshold*2
-            next_target = record.fetch_count + (self._threshold * 2)
-        else:
-            # Subsequent declines: double the gap from current fetch_count
-            # to the target that was just declined
-            prev_gap    = record.next_suggest_at - record.fetch_count
-            next_target = record.fetch_count + max(prev_gap * 2, self._threshold * 2)
-
-        record.user_state      = DocumentState.SURFACED
-        record.suggestion_sent = False
-        record.next_suggest_at = next_target
-        self._store.upsert(record)
-        return record
 
     # ─── Private ───────────────────────────────────────────────────────────────
 
@@ -177,23 +134,26 @@ class FetchCounter:
             self._store.upsert(record)
         return record
 
-    def _check_suggestion(self, record: UserDocRecord) -> Optional[SuggestionEvent]:
-        """Return a SuggestionEvent if fetch_count has reached the current target."""
-        if record.suggestion_sent:
-            return None
+    def _check_auto_save(
+        self,
+        record: UserDocRecord,
+        now:    datetime,
+    ) -> Optional[AutoSaveEvent]:
+        """Auto-save the document if fetch_count has reached the threshold."""
         if record.user_state not in (DocumentState.SURFACED, DocumentState.SUGGESTED):
             return None
 
-        target = record.next_suggest_at if record.next_suggest_at > 0 else self._threshold
-
-        if record.fetch_count < target:
+        if record.fetch_count < self._threshold:
             return None
 
-        # Mark as suggested
-        record.user_state      = DocumentState.SUGGESTED
-        record.suggestion_sent = True
+        # Auto-transition to CLAIMED
+        record = self._sm.transition(record, DocumentState.CLAIMED, now=now)
+        logger.info(
+            "Auto-saved doc_id=%r for user_id=%r (fetch_count=%d)",
+            record.doc_id, record.user_id, record.fetch_count,
+        )
 
-        return SuggestionEvent(
+        return AutoSaveEvent(
             user_id     = record.user_id,
             doc_id      = record.doc_id,
             doc_title   = record.doc_title,
