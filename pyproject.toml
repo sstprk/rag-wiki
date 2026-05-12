@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "langchain-rag-wiki"
-version = "0.2.2"
+version = "0.2.4"
 description = "LangChain-compatible hybrid knowledge base retrieval with user-curated personal KB layer"
 readme = "README.md"
 license = "MIT"
