@@ -6,6 +6,7 @@ that automatically saves frequently-accessed documents.
 """
 
 from rag_wiki.storage.base import DocumentState, StateStore, UserDocRecord
+from rag_wiki.storage.global_store import GlobalDocRecord, GlobalDocStore
 from rag_wiki.storage.memory import MemoryStateStore
 from rag_wiki.retriever import RagWikiRetriever, RagWikiRetrieverConfig
 from rag_wiki.lifecycle.state_machine import StateMachine
@@ -25,6 +26,8 @@ __all__ = [
     "StateStore",
     "MemoryStateStore",
     "UserDocRecord",
+    "GlobalDocRecord",
+    "GlobalDocStore",
     "DocumentState",
     # Lifecycle
     "StateMachine",
